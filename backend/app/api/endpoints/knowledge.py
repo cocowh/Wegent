@@ -2000,8 +2000,8 @@ def update_document_v1(
 
 
 @knowledge_router.put("/documents/{document_id}/content")
-@trace_async("update_document_content_v1", "knowledge.api")
-async def update_document_content_v1(
+@trace_sync("update_document_content_v1", "knowledge.api")
+def update_document_content_v1(
     document_id: int,
     data: DocumentContentUpdate,
     auth_context: AuthContext = Depends(get_auth_context),
@@ -2022,7 +2022,7 @@ async def update_document_content_v1(
     """
     current_user = auth_context.user
     try:
-        result = await knowledge_orchestrator.update_document_content(
+        result = knowledge_orchestrator.update_document_content(
             db=db,
             user=current_user,
             document_id=document_id,
