@@ -582,6 +582,9 @@ class DocumentContentReadResponse(BaseModel):
     returned_length: int = Field(..., ge=0, description="Number of characters returned")
     has_more: bool = Field(..., description="Whether more content is available")
     kb_id: int = Field(..., description="Knowledge base ID")
+    index_status: DocumentIndexStatus = Field(
+        ..., description="Document indexing status"
+    )
 
 
 class DocumentContentUpdate(BaseModel):
@@ -721,3 +724,59 @@ class KnowledgeBaseMigrateResponse(BaseModel):
     knowledge_base_id: int = Field(..., description="Knowledge base ID")
     old_namespace: str = Field(..., description="Original namespace")
     new_namespace: str = Field(..., description="New namespace after migration")
+
+
+# ============== v1 API Schemas ==============
+
+# Maximum allowed binary size for base64-encoded file uploads (10 MB)
+_MAX_FILE_BASE64_LEN = 13_631_072  # 10 MB * 4/3 rounded up
+
+
+class KnowledgeDocumentCreateV1(BaseModel):
+    """Request schema for v1 document creation endpoint.
+
+    Accepts all source types; unsupported types are rejected at the
+    handler level with a descriptive error.
+    """
+
+    knowledge_base_id: int = Field(..., description="Target knowledge base ID")
+    name: str = Field(..., min_length=1, max_length=255, description="Document name")
+    source_type: DocumentSourceType = Field(
+        DocumentSourceType.TEXT,
+        description=(
+            "Document source type: 'text' (inline content), 'file' (base64 binary), "
+            "'web' (URL scraping), 'attachment' (existing attachment ID)"
+        ),
+    )
+    # source_type=text
+    content: Optional[str] = Field(
+        None,
+        min_length=1,
+        max_length=500_000,
+        description="Text content (required for source_type='text')",
+    )
+    file_extension: Optional[str] = Field(
+        None,
+        description="File extension without leading dot, e.g. 'md' (optional for source_type='text')",
+    )
+    # source_type=file
+    file_base64: Optional[str] = Field(
+        None,
+        max_length=_MAX_FILE_BASE64_LEN,
+        description="Base64-encoded file binary (required for source_type='file', max 10 MB decoded)",
+    )
+    # source_type=web
+    url: Optional[str] = Field(
+        None,
+        description="URL to scrape (required for source_type='web')",
+    )
+    # source_type=attachment
+    attachment_id: Optional[int] = Field(
+        None,
+        description="Existing attachment ID (required for source_type='attachment')",
+    )
+    # common optional
+    splitter_config: Optional[SplitterConfig] = Field(
+        None,
+        description="Custom text splitter configuration",
+    )
