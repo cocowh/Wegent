@@ -744,6 +744,7 @@ class KnowledgeOrchestrator:
             returned_length=result["returned_length"],
             has_more=result["has_more"],
             kb_id=result["kb_id"],
+            index_status=document.index_status,
         )
 
     async def get_document_detail(
