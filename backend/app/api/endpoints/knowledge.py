@@ -44,10 +44,12 @@ from app.schemas.knowledge import (
     KnowledgeDocumentListResponse,
     KnowledgeDocumentResponse,
     KnowledgeDocumentUpdate,
+    KnowledgeSearchRequest,
     PersonalKnowledgeBaseGroup,
     ResourceScope,
 )
 from app.schemas.knowledge_qa_history import QAHistoryResponse
+from app.schemas.rag import RetrieveResponse
 from app.services.knowledge import (
     KnowledgeService,
     knowledge_base_qa_service,
@@ -1873,3 +1875,175 @@ async def create_document_v1(
         },
     )
     return document
+
+
+# ---------------------------------------------------------------------------
+# Interface 3 — POST /knowledge/search
+# ---------------------------------------------------------------------------
+
+
+@knowledge_router.post("/search", response_model=RetrieveResponse)
+@trace_async("search_documents_v1", "knowledge.api")
+async def search_documents_v1(
+    data: KnowledgeSearchRequest,
+    auth_context: AuthContext = Depends(get_auth_context),
+    db: Session = Depends(get_db),
+):
+    """Search document chunks in a knowledge base via RAG retrieval.
+
+    Retriever and embedding model are resolved automatically from the
+    knowledge base's ``retrievalConfig``, so callers only need to know
+    the knowledge base ID and the query text.
+
+    Authentication:
+        - Personal API key: Searches within the key owner's accessible KBs
+        - Service API key: Requires wegent-username header to specify the user
+
+    Returns:
+        RetrieveResponse with a ``records`` list of matching chunks,
+        each containing ``content``, ``score``, and ``title``.
+
+    Raises:
+        400: Knowledge base retrieval config is incomplete (missing retriever
+             or embedding model)
+        403: Access denied to the knowledge base
+        404: Knowledge base not found
+        502: Upstream RAG gateway error
+    """
+    current_user = auth_context.user
+    try:
+        from app.services.rag.remote_gateway import RemoteRagGatewayError
+
+        result = await knowledge_orchestrator.search_documents(
+            db=db,
+            user=current_user,
+            knowledge_base_id=data.knowledge_base_id,
+            query=data.query,
+            top_k=data.top_k,
+            score_threshold=data.score_threshold,
+        )
+        return {"records": result.get("records", [])}
+    except RemoteRagGatewayError as exc:
+        raise HTTPException(
+            status_code=exc.status_code or status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        )
+    except ValueError as exc:
+        error_msg = str(exc).lower()
+        if "not found" in error_msg:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+            )
+        if "access denied" in error_msg:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)
+            )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        )
+
+
+# ---------------------------------------------------------------------------
+# Interface 4a — PUT /knowledge/documents/{document_id}  (metadata update)
+# ---------------------------------------------------------------------------
+
+
+@knowledge_router.put(
+    "/documents/{document_id}", response_model=KnowledgeDocumentResponse
+)
+@trace_sync("update_document_v1", "knowledge.api")
+def update_document_v1(
+    document_id: int,
+    data: KnowledgeDocumentUpdate,
+    auth_context: AuthContext = Depends(get_auth_context),
+    db: Session = Depends(get_db),
+):
+    """Update document metadata (name, status, splitter_config).
+
+    This endpoint only modifies document metadata and does **not** trigger
+    RAG re-indexing.  To update document text content use the sibling
+    ``PUT /knowledge/documents/{id}/content`` endpoint.
+
+    Authentication:
+        - Personal API key: Updates the document under the key owner's account
+        - Service API key: Requires wegent-username header to specify the user
+    """
+    current_user = auth_context.user
+    try:
+        document = KnowledgeService.update_document(
+            db=db,
+            document_id=document_id,
+            user_id=current_user.id,
+            data=data,
+        )
+    except ValueError as exc:
+        error_msg = str(exc).lower()
+        if "not found" in error_msg:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+            )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)
+        )
+
+    if document is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found or access denied",
+        )
+    return KnowledgeDocumentResponse.model_validate(document)
+
+
+# ---------------------------------------------------------------------------
+# Interface 4b — PUT /knowledge/documents/{document_id}/content (content update)
+# ---------------------------------------------------------------------------
+
+
+@knowledge_router.put("/documents/{document_id}/content")
+@trace_async("update_document_content_v1", "knowledge.api")
+async def update_document_content_v1(
+    document_id: int,
+    data: DocumentContentUpdate,
+    auth_context: AuthContext = Depends(get_auth_context),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Update the text content of a document and trigger RAG re-indexing.
+
+    Only supported for TEXT-type documents and plain-text file documents
+    (.txt, .md, .markdown).  Overwrites the underlying attachment content
+    and schedules a Celery re-indexing job.
+
+    Authentication:
+        - Personal API key: Updates the document under the key owner's account
+        - Service API key: Requires wegent-username header to specify the user
+
+    Returns:
+        ``{"success": true, "document_id": <id>, "message": "..."}``
+    """
+    current_user = auth_context.user
+    try:
+        result = await knowledge_orchestrator.update_document_content(
+            db=db,
+            user=current_user,
+            document_id=document_id,
+            content=data.content,
+            trigger_reindex=True,
+        )
+    except ValueError as exc:
+        error_msg = str(exc).lower()
+        if "not found" in error_msg or "access denied" in error_msg:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+            )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        )
+
+    add_span_event(
+        "knowledge.document.content_updated.v1",
+        {
+            "document_id": str(document_id),
+            "user_id": str(current_user.id),
+        },
+    )
+    return result

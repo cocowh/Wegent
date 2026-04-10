@@ -780,3 +780,20 @@ class KnowledgeDocumentCreateV1(BaseModel):
         None,
         description="Custom text splitter configuration",
     )
+
+
+class KnowledgeSearchRequest(BaseModel):
+    """Request schema for v1 knowledge base search endpoint.
+
+    Resolves retriever and embedding model automatically from KB config,
+    so callers only need to specify what to search, not how.
+    """
+
+    knowledge_base_id: int = Field(..., description="Knowledge base ID to search in")
+    query: str = Field(
+        ..., min_length=1, max_length=2000, description="Search query text"
+    )
+    top_k: int = Field(5, ge=1, le=100, description="Number of results to return")
+    score_threshold: float = Field(
+        0.7, ge=0.0, le=1.0, description="Minimum similarity score threshold"
+    )
