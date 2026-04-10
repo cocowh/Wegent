@@ -2113,6 +2113,108 @@ class KnowledgeOrchestrator:
                 "error_message": str(e),
             }
 
+    async def search_documents(
+        self,
+        *,
+        db: Session,
+        user: User,
+        knowledge_base_id: int,
+        query: str,
+        top_k: int = 5,
+        score_threshold: float = 0.7,
+    ) -> dict:
+        """Search documents in a knowledge base using RAG retrieval.
+
+        Resolves retriever and embedding model automatically from the KB's
+        retrievalConfig, so callers only need to supply the search query.
+
+        Args:
+            db: Database session.
+            user: Requesting user (used for access control).
+            knowledge_base_id: Target knowledge base ID.
+            query: Search query text.
+            top_k: Maximum number of results to return.
+            score_threshold: Minimum similarity score threshold.
+
+        Returns:
+            Dict with ``records`` list of matching chunks.
+
+        Raises:
+            ValueError: If KB is not found, access denied, or retrieval
+                config is incomplete.
+        """
+        # Lazy imports to avoid circular dependencies
+        from app.services.rag.gateway_factory import get_query_gateway
+        from app.services.rag.local_gateway import LocalRagGateway
+        from app.services.rag.remote_gateway import (
+            RemoteRagGatewayError,
+            should_fallback_to_local,
+        )
+        from app.services.rag.runtime_resolver import RagRuntimeResolver
+
+        # Fetch KB and validate access — raise distinct messages so callers can
+        # map not-found → 404 and access-denied → 403 without ambiguity.
+        kb, has_access = KnowledgeService.get_knowledge_base(
+            db=db,
+            knowledge_base_id=knowledge_base_id,
+            user_id=user.id,
+        )
+        if kb is None:
+            raise ValueError(
+                f"Knowledge base {knowledge_base_id} not found"
+            )
+        if not has_access:
+            raise ValueError(
+                f"Access denied to knowledge base {knowledge_base_id}"
+            )
+
+        # Extract retrieval config from KB spec (nested embedding_config structure)
+        retrieval_config = (kb.json or {}).get("spec", {}).get("retrievalConfig") or {}
+        retriever_name = retrieval_config.get("retriever_name")
+        retriever_namespace = retrieval_config.get("retriever_namespace", "default")
+        embedding_config = retrieval_config.get("embedding_config") or {}
+        embedding_model_name = embedding_config.get("model_name")
+        embedding_model_namespace = embedding_config.get("model_namespace", "default")
+
+        if not retriever_name:
+            raise ValueError(
+                f"Knowledge base {knowledge_base_id} has incomplete retrieval config "
+                "(missing retriever_name)"
+            )
+        if not embedding_model_name:
+            raise ValueError(
+                f"Knowledge base {knowledge_base_id} has incomplete retrieval config "
+                "(missing embedding model)"
+            )
+
+        # build_public_query_runtime_spec performs its own KB access check internally;
+        # the duplicate query is acceptable given the simple primary-key lookup cost.
+        resolver = RagRuntimeResolver()
+        runtime_spec = resolver.build_public_query_runtime_spec(
+            db=db,
+            knowledge_base_id=knowledge_base_id,
+            query=query,
+            max_results=top_k,
+            retriever_name=retriever_name,
+            retriever_namespace=retriever_namespace,
+            embedding_model_name=embedding_model_name,
+            embedding_model_namespace=embedding_model_namespace,
+            user_id=user.id,
+            user_name=user.user_name,
+            score_threshold=score_threshold,
+            retrieval_mode="vector",
+        )
+
+        gateway = get_query_gateway()
+        try:
+            result = await gateway.query(runtime_spec, db=db)
+        except RemoteRagGatewayError as exc:
+            if not should_fallback_to_local(exc):
+                raise
+            result = await LocalRagGateway().query(runtime_spec, db=db)
+
+        return result
+
 
 # Singleton instance
 knowledge_orchestrator = KnowledgeOrchestrator()
