@@ -1910,10 +1910,10 @@ async def search_documents_v1(
         404: Knowledge base not found
         502: Upstream RAG gateway error
     """
+    from app.services.rag.remote_gateway import RemoteRagGatewayError
+
     current_user = auth_context.user
     try:
-        from app.services.rag.remote_gateway import RemoteRagGatewayError
-
         result = await knowledge_orchestrator.search_documents(
             db=db,
             user=current_user,

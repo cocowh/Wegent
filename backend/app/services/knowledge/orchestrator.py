@@ -2152,15 +2152,20 @@ class KnowledgeOrchestrator:
         )
         from app.services.rag.runtime_resolver import RagRuntimeResolver
 
-        # Fetch KB and validate access
+        # Fetch KB and validate access — raise distinct messages so callers can
+        # map not-found → 404 and access-denied → 403 without ambiguity.
         kb, has_access = KnowledgeService.get_knowledge_base(
             db=db,
             knowledge_base_id=knowledge_base_id,
             user_id=user.id,
         )
-        if kb is None or not has_access:
+        if kb is None:
             raise ValueError(
-                f"Knowledge base {knowledge_base_id} not found or access denied"
+                f"Knowledge base {knowledge_base_id} not found"
+            )
+        if not has_access:
+            raise ValueError(
+                f"Access denied to knowledge base {knowledge_base_id}"
             )
 
         # Extract retrieval config from KB spec (nested embedding_config structure)
