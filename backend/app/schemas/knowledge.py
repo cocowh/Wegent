@@ -39,6 +39,7 @@ class DocumentSourceType(str, Enum):
     TEXT = "text"
     TABLE = "table"
     WEB = "web"
+    ATTACHMENT = "attachment"
 
 
 class DocumentIndexStatus(str, Enum):
