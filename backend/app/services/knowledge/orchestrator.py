@@ -2160,13 +2160,9 @@ class KnowledgeOrchestrator:
             user_id=user.id,
         )
         if kb is None:
-            raise ValueError(
-                f"Knowledge base {knowledge_base_id} not found"
-            )
+            raise ValueError(f"Knowledge base {knowledge_base_id} not found")
         if not has_access:
-            raise ValueError(
-                f"Access denied to knowledge base {knowledge_base_id}"
-            )
+            raise ValueError(f"Access denied to knowledge base {knowledge_base_id}")
 
         # Extract retrieval config from KB spec (nested embedding_config structure)
         retrieval_config = (kb.json or {}).get("spec", {}).get("retrievalConfig") or {}
@@ -2187,12 +2183,13 @@ class KnowledgeOrchestrator:
                 "(missing embedding model)"
             )
 
-        # build_public_query_runtime_spec performs its own KB access check internally;
-        # the duplicate query is acceptable given the simple primary-key lookup cost.
+        # Use build_public_query_runtime_spec_from_kb with the already-resolved kb
+        # object to avoid the duplicate DB access check that the standard
+        # build_public_query_runtime_spec performs internally.
         resolver = RagRuntimeResolver()
-        runtime_spec = resolver.build_public_query_runtime_spec(
+        runtime_spec = resolver.build_public_query_runtime_spec_from_kb(
+            kb=kb,
             db=db,
-            knowledge_base_id=knowledge_base_id,
             query=query,
             max_results=top_k,
             retriever_name=retriever_name,
@@ -2204,7 +2201,6 @@ class KnowledgeOrchestrator:
             score_threshold=score_threshold,
             retrieval_mode="vector",
         )
-
         gateway = get_query_gateway()
         try:
             result = await gateway.query(runtime_spec, db=db)

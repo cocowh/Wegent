@@ -46,6 +46,7 @@ class DocumentSourceType(str, PyEnum):
     TEXT = "text"  # Pasted text
     TABLE = "table"  # External table (DingTalk, Feishu, etc.)
     WEB = "web"  # Web page (scraped URL)
+    ATTACHMENT = "attachment"  # Reference to an existing SubtaskContext attachment
 
 
 class DocumentIndexStatus(str, PyEnum):
