@@ -783,6 +783,14 @@ class KnowledgeDocumentCreateV1(BaseModel):
     )
 
 
+class DocumentContentUpdateResponse(BaseModel):
+    """Response schema for the v1 document content update endpoint."""
+
+    success: bool = Field(..., description="Whether the update succeeded")
+    document_id: int = Field(..., description="ID of the updated document")
+    message: str = Field(..., description="Human-readable result message")
+
+
 class KnowledgeSearchRequest(BaseModel):
     """Request schema for v1 knowledge base search endpoint.
 

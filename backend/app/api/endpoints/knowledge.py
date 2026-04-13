@@ -31,6 +31,7 @@ from app.schemas.knowledge import (
     BatchOperationResult,
     DocumentContentReadResponse,
     DocumentContentUpdate,
+    DocumentContentUpdateResponse,
     DocumentDetailResponse,
     KnowledgeBaseCreate,
     KnowledgeBaseListResponse,
@@ -1867,6 +1868,13 @@ async def create_document_v1(
             raise HTTPException(status_code=http_status, detail=error_message)
 
         document = result.get("document")
+        if document is None:
+            # Scraping reported success but returned no document object — treat as
+            # a server-side failure rather than silently crashing on attribute access.
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Web document creation succeeded but response is incomplete",
+            )
         add_span_event(
             "knowledge.document.created.web",
             {
@@ -2024,7 +2032,10 @@ def update_document_v1(
         error_msg = str(exc).lower()
         if "not found" in error_msg:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
+        if "access denied" in error_msg or "permission denied" in error_msg:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
+        # Validation errors (e.g. invalid field value) should surface as 400
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
     if document is None:
         raise HTTPException(
@@ -2039,14 +2050,17 @@ def update_document_v1(
 # ---------------------------------------------------------------------------
 
 
-@knowledge_router.put("/documents/{document_id}/content")
+@knowledge_router.put(
+    "/documents/{document_id}/content",
+    response_model=DocumentContentUpdateResponse,
+)
 @trace_sync("update_document_content_v1", "knowledge.api")
 def update_document_content_v1(
     document_id: int,
     data: DocumentContentUpdate,
     auth_context: AuthContext = Depends(get_auth_context),
     db: Session = Depends(get_db),
-) -> dict:
+) -> DocumentContentUpdateResponse:
     """Update the text content of a document and trigger RAG re-indexing.
 
     Only supported for TEXT-type documents and plain-text file documents
@@ -2071,8 +2085,10 @@ def update_document_content_v1(
         )
     except ValueError as exc:
         error_msg = str(exc).lower()
-        if "not found" in error_msg or "access denied" in error_msg:
+        if "not found" in error_msg:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+        if "access denied" in error_msg or "permission denied" in error_msg:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
     add_span_event(
