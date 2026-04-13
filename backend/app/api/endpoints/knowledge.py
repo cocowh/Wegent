@@ -1672,6 +1672,54 @@ def list_knowledge_bases_v1(
 
 
 @knowledge_router.get(
+    "/documents",
+    response_model=KnowledgeDocumentListResponse,
+)
+@trace_sync("list_documents_v1", "knowledge.api")
+def list_documents_v1(
+    knowledge_base_id: int = Query(
+        ...,
+        description="Knowledge base ID to list documents from",
+    ),
+    auth_context: AuthContext = Depends(get_auth_context),
+    db: Session = Depends(get_db),
+):
+    """
+    List documents in a knowledge base.
+
+    Returns all documents belonging to the specified knowledge base,
+    provided the authenticated user has access to it.
+
+    Authentication:
+        - Personal API key: Returns documents accessible to the key owner
+        - Service API key: Requires wegent-username header to specify the target user
+    """
+    current_user = auth_context.user
+    try:
+        return knowledge_orchestrator.list_documents(
+            db=db,
+            user=current_user,
+            knowledge_base_id=knowledge_base_id,
+        )
+    except ValueError as exc:
+        error_msg = str(exc).lower()
+        if "not found" in error_msg:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(exc),
+            )
+        if "access denied" in error_msg:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=str(exc),
+            )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+
+
+@knowledge_router.get(
     "/documents/{document_id}/content",
     response_model=DocumentContentReadResponse,
 )
@@ -1761,7 +1809,9 @@ async def create_document_v1(
         - Service API key: Requires wegent-username header to specify the target user
     """
     current_user = auth_context.user
-    source_type = data.source_type.value  # e.g. "text", "file", "web", "attachment", "table"
+    source_type = (
+        data.source_type.value
+    )  # e.g. "text", "file", "web", "attachment", "table"
 
     # Reject unsupported source types early with a clear message
     _SUPPORTED_SOURCE_TYPES = {"text", "file", "web", "attachment"}
@@ -1931,16 +1981,10 @@ async def search_documents_v1(
     except ValueError as exc:
         error_msg = str(exc).lower()
         if "not found" in error_msg:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
         if "access denied" in error_msg:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)
-            )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
-        )
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
 
 # ---------------------------------------------------------------------------
@@ -1979,12 +2023,8 @@ def update_document_v1(
     except ValueError as exc:
         error_msg = str(exc).lower()
         if "not found" in error_msg:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
-            )
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)
-        )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
 
     if document is None:
         raise HTTPException(
@@ -2032,12 +2072,8 @@ def update_document_content_v1(
     except ValueError as exc:
         error_msg = str(exc).lower()
         if "not found" in error_msg or "access denied" in error_msg:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
-            )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
-        )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
     add_span_event(
         "knowledge.document.content_updated.v1",
