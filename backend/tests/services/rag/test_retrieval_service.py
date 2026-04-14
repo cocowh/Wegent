@@ -621,7 +621,7 @@ class TestRetrieveForChatShell:
                 create=True,
             ) as mock_resolve,
             patch(
-                "app.services.rag.retrieval_service.RetrievalService.retrieve_for_chat_shell",
+                "app.services.rag.retrieval_service.RetrievalService.retrieve_with_routing",
                 new_callable=AsyncMock,
                 return_value={
                     "mode": "rag_retrieval",
