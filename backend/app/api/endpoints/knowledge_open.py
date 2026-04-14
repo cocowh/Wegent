@@ -398,13 +398,18 @@ async def search_documents_open(
 
     current_user = auth_context.user
     try:
-        result = await knowledge_orchestrator.search_knowledge_base(
+        result = await knowledge_orchestrator.retrieve_knowledge(
             db=db,
             user=current_user,
             knowledge_base_id=data.knowledge_base_id,
             query=data.query,
             max_results=data.top_k,
-            route_mode="rag_retrieval",
+            route_mode=data.route_mode,
+            context_window=data.context_window,
+            used_context_tokens=data.used_context_tokens,
+            reserved_output_tokens=data.reserved_output_tokens,
+            context_buffer_ratio=data.context_buffer_ratio,
+            max_direct_chunks=data.max_direct_chunks,
         )
         return {"records": result.get("records", [])}
     except RemoteRagGatewayError as exc:
