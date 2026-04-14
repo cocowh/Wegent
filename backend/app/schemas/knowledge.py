@@ -802,3 +802,34 @@ class KnowledgeSearchRequest(BaseModel):
     score_threshold: float = Field(
         0.7, ge=0.0, le=1.0, description="Minimum similarity score threshold"
     )
+    route_mode: str = Field(
+        "auto",
+        description="Retrieval mode: 'auto', 'direct_injection', or 'rag_retrieval'",
+    )
+    context_window: int = Field(
+        100000,
+        ge=1,
+        description="Context window size for direct injection mode",
+    )
+    used_context_tokens: int = Field(
+        0,
+        ge=0,
+        description="Already used context tokens",
+    )
+    reserved_output_tokens: int = Field(
+        4096,
+        ge=0,
+        description="Reserved output tokens",
+    )
+    context_buffer_ratio: float = Field(
+        0.1,
+        ge=0.0,
+        le=1.0,
+        description="Context buffer ratio for safety margin",
+    )
+    max_direct_chunks: int = Field(
+        500,
+        ge=1,
+        le=10000,
+        description="Maximum chunks for direct injection",
+    )
