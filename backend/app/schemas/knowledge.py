@@ -728,8 +728,9 @@ class KnowledgeBaseMigrateResponse(BaseModel):
 
 # ============== v1 API Schemas ==============
 
-# Maximum allowed binary size for base64-encoded file uploads (10 MB)
-_MAX_FILE_BASE64_LEN = 13_631_072  # 10 MB * 4/3 rounded up
+# Maximum allowed binary size for base64-encoded file uploads (10 MiB)
+_MAX_FILE_DECODED_BYTES = 10 * 1024 * 1024
+_MAX_FILE_BASE64_LEN = ((_MAX_FILE_DECODED_BYTES + 2) // 3) * 4  # 13_981_016
 
 
 class KnowledgeDocumentCreateV1(BaseModel):
@@ -757,6 +758,7 @@ class KnowledgeDocumentCreateV1(BaseModel):
     )
     file_extension: Optional[str] = Field(
         None,
+        max_length=50,
         description="File extension without leading dot, e.g. 'md' (optional for source_type='text')",
     )
     # source_type=file

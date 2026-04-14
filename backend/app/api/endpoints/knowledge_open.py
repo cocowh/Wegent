@@ -55,7 +55,7 @@ def list_knowledge_bases_open(
     ),
     auth_context: AuthContext = Depends(get_auth_context),
     db: Session = Depends(get_db),
-):
+) -> KnowledgeBaseListResponse:
     """
     List knowledge bases with flexible authentication.
 
@@ -105,7 +105,7 @@ def list_documents_open(
     ),
     auth_context: AuthContext = Depends(get_auth_context),
     db: Session = Depends(get_db),
-):
+) -> KnowledgeDocumentListResponse:
     """
     List documents in a knowledge base.
 
@@ -162,7 +162,7 @@ def get_document_content_open(
     ),
     auth_context: AuthContext = Depends(get_auth_context),
     db: Session = Depends(get_db),
-):
+) -> DocumentContentReadResponse:
     """
     Get raw document content with pagination.
 
@@ -219,7 +219,7 @@ async def create_document_open(
     data: KnowledgeDocumentCreateV1,
     auth_context: AuthContext = Depends(get_auth_context),
     db: Session = Depends(get_db),
-):
+) -> KnowledgeDocumentResponse:
     """
     Create a document in a knowledge base.
 
@@ -377,7 +377,7 @@ async def search_documents_open(
     data: KnowledgeSearchRequest,
     auth_context: AuthContext = Depends(get_auth_context),
     db: Session = Depends(get_db),
-):
+) -> RetrieveResponse:
     """Search document chunks in a knowledge base via RAG retrieval.
 
     Retriever and embedding model are resolved automatically from the
@@ -438,7 +438,7 @@ def update_document_open(
     data: KnowledgeDocumentUpdate,
     auth_context: AuthContext = Depends(get_auth_context),
     db: Session = Depends(get_db),
-):
+) -> KnowledgeDocumentResponse:
     """Update document metadata (name, status, splitter_config).
 
     This endpoint only modifies document metadata and does **not** trigger
@@ -469,7 +469,7 @@ def update_document_open(
     if document is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Document not found or access denied",
+            detail="Document not found",
         )
     return KnowledgeDocumentResponse.model_validate(document)
 
