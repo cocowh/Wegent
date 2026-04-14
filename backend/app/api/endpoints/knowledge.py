@@ -1799,11 +1799,9 @@ async def create_document_v1(
       extension via `file_extension` (required). Maximum decoded size: 10 MB.
     - **web**: Provide a URL via the `url` field. The page is scraped and
       converted to Markdown automatically.
-    - **attachment**: Provide an existing attachment ID via `attachment_id`.
-      The attachment must be owned by the authenticated user.
 
-    The `table` source type is not supported via this endpoint; it is reserved
-    for real-time external table integrations.
+    The `table` and `attachment` source types are not supported via this endpoint.
+    `table` is reserved for real-time external table integrations.
 
     Authentication:
         - Personal API key: Creates the document under the key owner's account
@@ -1812,10 +1810,10 @@ async def create_document_v1(
     current_user = auth_context.user
     source_type = (
         data.source_type.value
-    )  # e.g. "text", "file", "web", "attachment", "table"
+    )  # e.g. "text", "file", "web", "table"
 
     # Reject unsupported source types early with a clear message
-    _SUPPORTED_SOURCE_TYPES = {"text", "file", "web", "attachment"}
+    _SUPPORTED_SOURCE_TYPES = {"text", "file", "web"}
     if source_type not in _SUPPORTED_SOURCE_TYPES:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -1885,7 +1883,7 @@ async def create_document_v1(
         )
         return document
 
-    # text / file / attachment — all handled by create_document_with_content (sync)
+    # text / file — all handled by create_document_with_content (sync)
     splitter_config_dict = (
         data.splitter_config.model_dump(exclude_none=True)
         if data.splitter_config
@@ -1901,7 +1899,6 @@ async def create_document_v1(
             content=data.content,
             file_base64=data.file_base64,
             file_extension=data.file_extension,
-            attachment_id=data.attachment_id,
             trigger_indexing=True,
             trigger_summary=True,
             splitter_config=splitter_config_dict,
@@ -2099,3 +2096,4 @@ def update_document_content_v1(
         },
     )
     return result
+
