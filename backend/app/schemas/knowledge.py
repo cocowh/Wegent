@@ -728,8 +728,9 @@ class KnowledgeBaseMigrateResponse(BaseModel):
 
 # ============== v1 API Schemas ==============
 
-# Maximum allowed binary size for base64-encoded file uploads (10 MB)
-_MAX_FILE_BASE64_LEN = 13_631_072  # 10 MB * 4/3 rounded up
+# Maximum allowed binary size for base64-encoded file uploads (10 MiB)
+_MAX_FILE_DECODED_BYTES = 10 * 1024 * 1024
+_MAX_FILE_BASE64_LEN = ((_MAX_FILE_DECODED_BYTES + 2) // 3) * 4  # 13_981_016
 
 
 class KnowledgeDocumentCreateV1(BaseModel):
@@ -757,6 +758,7 @@ class KnowledgeDocumentCreateV1(BaseModel):
     )
     file_extension: Optional[str] = Field(
         None,
+        max_length=50,
         description="File extension without leading dot, e.g. 'md' (optional for source_type='text')",
     )
     # source_type=file
@@ -799,4 +801,35 @@ class KnowledgeSearchRequest(BaseModel):
     top_k: int = Field(5, ge=1, le=100, description="Number of results to return")
     score_threshold: float = Field(
         0.7, ge=0.0, le=1.0, description="Minimum similarity score threshold"
+    )
+    route_mode: str = Field(
+        "auto",
+        description="Retrieval mode: 'auto', 'direct_injection', or 'rag_retrieval'",
+    )
+    context_window: int = Field(
+        128000,
+        ge=1,
+        description="Context window size for direct injection mode",
+    )
+    used_context_tokens: int = Field(
+        0,
+        ge=0,
+        description="Already used context tokens",
+    )
+    reserved_output_tokens: int = Field(
+        4096,
+        ge=0,
+        description="Reserved output tokens",
+    )
+    context_buffer_ratio: float = Field(
+        0.1,
+        ge=0.0,
+        le=1.0,
+        description="Context buffer ratio for safety margin",
+    )
+    max_direct_chunks: int = Field(
+        500,
+        ge=1,
+        le=10000,
+        description="Maximum chunks for direct injection",
     )

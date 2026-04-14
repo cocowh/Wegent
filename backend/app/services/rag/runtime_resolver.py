@@ -135,68 +135,6 @@ class RagRuntimeResolver:
             direct_injection_budget=direct_injection_budget,
         )
 
-    def build_public_query_runtime_spec_from_kb(
-        self,
-        *,
-        kb: Kind,
-        db: Session,
-        query: str,
-        max_results: int,
-        retriever_name: str,
-        retriever_namespace: str,
-        embedding_model_name: str,
-        embedding_model_namespace: str,
-        user_id: int,
-        user_name: str | None,
-        score_threshold: float,
-        retrieval_mode: str,
-        vector_weight: float | None = None,
-        keyword_weight: float | None = None,
-        metadata_condition: dict | None = None,
-    ) -> QueryRuntimeSpec:
-        """Build a QueryRuntimeSpec from an already-resolved, access-validated KB object.
-
-        This is an overload of ``build_public_query_runtime_spec`` for callers
-        that have already fetched and verified access to the KB.  Skipping the
-        redundant DB lookup avoids the double-query pattern noted in the
-        ``search_documents`` orchestrator method.
-        """
-        return QueryRuntimeSpec(
-            knowledge_base_ids=[kb.id],
-            query=query,
-            max_results=max_results,
-            route_mode="rag_retrieval",
-            metadata_condition=metadata_condition,
-            user_id=user_id,
-            user_name=user_name,
-            knowledge_base_configs=[
-                QueryKnowledgeBaseRuntimeConfig(
-                    knowledge_base_id=kb.id,
-                    index_owner_user_id=kb.user_id,
-                    retriever_config=self._build_resolved_retriever_config(
-                        db=db,
-                        user_id=kb.user_id,
-                        name=retriever_name,
-                        namespace=retriever_namespace,
-                    ),
-                    embedding_model_config=self._build_resolved_embedding_model_config(
-                        db=db,
-                        user_id=kb.user_id,
-                        model_name=embedding_model_name,
-                        model_namespace=embedding_model_namespace,
-                        user_name=user_name,
-                    ),
-                    retrieval_config=RuntimeRetrievalConfig(
-                        top_k=max_results,
-                        score_threshold=score_threshold,
-                        retrieval_mode=retrieval_mode,
-                        vector_weight=vector_weight,
-                        keyword_weight=keyword_weight,
-                    ),
-                )
-            ],
-        )
-
     def build_public_query_runtime_spec(
         self,
         *,
