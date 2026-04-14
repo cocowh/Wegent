@@ -460,7 +460,7 @@ class RetrievalService:
                     direct_records.append(
                         {
                             "content": chunk.get("content", ""),
-                            "score": None,
+                            "score": 1.0,  # Direct injection returns all chunks, use max score
                             "title": chunk.get("title", "Unknown"),
                             "metadata": chunk.get("metadata"),
                             "knowledge_base_id": kb_id,
