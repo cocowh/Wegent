@@ -49,7 +49,7 @@ async def test_retrieve_for_chat_shell_no_longer_persists_subtask_context():
         create_knowledge_base_context_with_result=mock_create_context,
         update_knowledge_base_retrieval_result=mock_update_context,
     ):
-        result = await service.retrieve_for_chat_shell(
+        result = await service.retrieve_with_routing(
             query="test",
             knowledge_base_ids=[1],
             db=MagicMock(),
@@ -213,7 +213,7 @@ class TestRetrieveForChatShell:
                 ]
             )
 
-            result = await service.retrieve_for_chat_shell(
+            result = await service.retrieve_with_routing(
                 query="test",
                 knowledge_base_ids=[123],
                 db=db,
@@ -270,7 +270,7 @@ class TestRetrieveForChatShell:
                 }
             )
 
-            result = await service.retrieve_for_chat_shell(
+            result = await service.retrieve_with_routing(
                 query="test",
                 knowledge_base_ids=[123],
                 db=db,
@@ -322,7 +322,7 @@ class TestRetrieveForChatShell:
             }
         )
 
-        result = await service.retrieve_for_chat_shell(
+        result = await service.retrieve_with_routing(
             query="test",
             knowledge_base_ids=[123],
             db=db,
@@ -357,7 +357,7 @@ class TestRetrieveForChatShell:
             "_estimate_total_tokens_for_knowledge_bases",
             return_value=100,
         ) as mock_estimate:
-            result = await service.retrieve_for_chat_shell(
+            result = await service.retrieve_with_routing(
                 query="test",
                 knowledge_base_ids=[123],
                 db=db,
@@ -538,7 +538,7 @@ class TestRetrieveForChatShell:
             }
         )
 
-        result = await service.retrieve_for_chat_shell(
+        result = await service.retrieve_with_routing(
             query="test",
             knowledge_base_ids=[123],
             db=db,
@@ -570,7 +570,7 @@ class TestRetrieveForChatShell:
             }
         )
 
-        result = await service.retrieve_for_chat_shell(
+        result = await service.retrieve_with_routing(
             query="test",
             knowledge_base_ids=[123],
             db=db,
@@ -688,7 +688,7 @@ class TestRetrieveForChatShell:
             ]
         )
 
-        result = await service.retrieve_for_chat_shell(
+        result = await service.retrieve_with_routing(
             query="test",
             knowledge_base_ids=[123, 456],
             db=db,
@@ -766,7 +766,7 @@ class TestRetrieveForChatShell:
                 },
             ) as mock_execute,
         ):
-            result = await RetrievalService().retrieve_for_chat_shell(
+            result = await RetrievalService().retrieve_with_routing(
                 query="release checklist",
                 knowledge_base_ids=[123],
                 db=db,
