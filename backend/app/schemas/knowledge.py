@@ -807,7 +807,7 @@ class KnowledgeSearchRequest(BaseModel):
         description="Retrieval mode: 'auto', 'direct_injection', or 'rag_retrieval'",
     )
     context_window: int = Field(
-        100000,
+        128000,
         ge=1,
         description="Context window size for direct injection mode",
     )

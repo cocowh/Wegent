@@ -2123,7 +2123,7 @@ class KnowledgeOrchestrator:
         max_results: int = 10,
         document_ids: Optional[List[int]] = None,
         route_mode: Literal["auto", "direct_injection", "rag_retrieval"] = "auto",
-        context_window: int = 100000,
+        context_window: int = 128000,
         used_context_tokens: int = 0,
         reserved_output_tokens: int = 4096,
         context_buffer_ratio: float = 0.1,
