@@ -38,6 +38,7 @@ from app.schemas.openapi_response import (
     ResponseObject,
 )
 from app.services.adapters.task_kinds import task_kinds_service
+from app.services.chat.preprocessing import link_contexts_to_subtask
 from app.services.openapi.helpers import (
     extract_input_text,
     parse_model_string,
@@ -395,8 +396,6 @@ async def _create_non_streaming_response_unified(
 
     # Link attachments to user subtask if provided
     if request_body.attachment_ids:
-        from app.services.chat.preprocessing import link_contexts_to_subtask
-
         try:
             link_contexts_to_subtask(
                 db=db,
@@ -713,8 +712,6 @@ async def _create_streaming_response_unified(
 
     # Link attachments to user subtask if provided
     if request_body.attachment_ids:
-        from app.services.chat.preprocessing import link_contexts_to_subtask
-
         try:
             link_contexts_to_subtask(
                 db=db,
