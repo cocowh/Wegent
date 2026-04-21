@@ -406,14 +406,24 @@ def link_contexts_to_subtask(
 
     Returns:
         List of all linked/created context IDs
+
+    Raises:
+        ValueError: If attachment validation fails (invalid ownership, status, or binding)
     """
     # Import TaskResource for type hint
     from app.models.task import TaskResource
 
     linked_context_ids = []
 
-    # Collect attachment IDs to link
+    # Validate and link attachments with permission checks
     if attachment_ids:
+        _validate_and_link_attachments(
+            db=db,
+            subtask_id=subtask_id,
+            user_id=user_id,
+            attachment_ids=attachment_ids,
+            task=task,
+        )
         linked_context_ids.extend(attachment_ids)
 
     # Prepare knowledge base, table, and selected_documents contexts for batch creation
@@ -433,7 +443,7 @@ def link_contexts_to_subtask(
     # Execute all database operations in a single transaction
     try:
         created_context_ids = _batch_update_and_insert_contexts(
-            db, attachment_ids, all_contexts_to_create, subtask_id
+            db, None, all_contexts_to_create, subtask_id
         )
         linked_context_ids.extend(created_context_ids)
 
@@ -1503,3 +1513,124 @@ def get_table_context_ids_from_subtask(
         if c.context_type == ContextType.TABLE.value
         and c.status == ContextStatus.READY.value
     ]
+
+
+def _validate_and_link_attachments(
+    db: Session,
+    subtask_id: int,
+    user_id: int,
+    attachment_ids: List[int],
+    task: Optional["TaskResource"] = None,
+) -> None:
+    """Validate attachment ownership and link attachments to subtask.
+
+    Validates that:
+    - Attachments belong to the current user
+    - Attachments are of type ATTACHMENT
+    - Attachments are in READY status
+    - Attachments are either unlinked or already linked to the same task
+      (when task is provided)
+
+    This prevents attachments from being "stolen" from other active conversations
+    while still allowing retry scenarios within the same task.
+
+    Args:
+        db: Database session
+        subtask_id: Subtask ID to link attachments to
+        user_id: User ID for ownership validation
+        attachment_ids: List of attachment IDs to validate and link
+        task: Optional TaskResource for task-level binding validation.
+              If None, only unlinked attachments are allowed.
+
+    Raises:
+        ValueError: If any attachment IDs are invalid or unauthorized
+    """
+    from sqlalchemy import or_, select, update
+
+    from app.models.subtask import Subtask
+    from shared.models.db import ContextStatus
+
+    # Build base query filters for validation
+    validation_filters = [
+        SubtaskContext.id.in_(attachment_ids),
+        SubtaskContext.user_id == user_id,
+        SubtaskContext.context_type == ContextType.ATTACHMENT.value,
+        SubtaskContext.status == ContextStatus.READY.value,
+    ]
+
+    # Add binding validation based on whether task is provided
+    if task:
+        # Build subquery: find all subtask IDs belonging to the same task
+        task_subtask_ids = (
+            select(Subtask.id)
+            .filter(Subtask.task_id == task.id, Subtask.user_id == user_id)
+            .scalar_subquery()
+        )
+        # Allow unlinked or same-task attachments
+        validation_filters.append(
+            or_(
+                SubtaskContext.subtask_id == 0,  # Unlinked
+                SubtaskContext.subtask_id.in_(task_subtask_ids),  # Same task
+            )
+        )
+    else:
+        # Without task context, only allow unlinked attachments
+        validation_filters.append(SubtaskContext.subtask_id == 0)
+
+    # Validate attachment ownership and state with row locking
+    valid_attachment_rows = (
+        db.query(SubtaskContext.id)
+        .filter(*validation_filters)
+        .with_for_update()
+        .all()
+    )
+    valid_attachment_ids = [row[0] for row in valid_attachment_rows]
+
+    # Check if any requested IDs are invalid or don't belong to the user
+    invalid_ids = set(attachment_ids) - set(valid_attachment_ids)
+    if invalid_ids:
+        raise ValueError(
+            f"Invalid or unauthorized attachment IDs: {sorted(invalid_ids)}"
+        )
+
+    # Perform the linking using a conditional update that includes predicates
+    # This ensures atomic validation+linking and provides feedback on affected rows
+    update_filters = [
+        SubtaskContext.id.in_(valid_attachment_ids),
+        SubtaskContext.user_id == user_id,
+        SubtaskContext.context_type == ContextType.ATTACHMENT.value,
+        SubtaskContext.status == ContextStatus.READY.value,
+    ]
+
+    if task:
+        task_subtask_ids = (
+            select(Subtask.id)
+            .filter(Subtask.task_id == task.id, Subtask.user_id == user_id)
+            .scalar_subquery()
+        )
+        update_filters.append(
+            or_(
+                SubtaskContext.subtask_id == 0,
+                SubtaskContext.subtask_id.in_(task_subtask_ids),
+            )
+        )
+    else:
+        update_filters.append(SubtaskContext.subtask_id == 0)
+
+    update_stmt = (
+        update(SubtaskContext)
+        .where(*update_filters)
+        .values(subtask_id=subtask_id)
+    )
+    result = db.execute(update_stmt)
+
+    # Verify all expected rows were updated
+    if result.rowcount != len(valid_attachment_ids):
+        raise ValueError(
+            "Some attachments could not be linked. Please retry."
+        )
+
+    logger.info(
+        f"[_validate_and_link_attachments] Linked {result.rowcount} attachments "
+        f"to subtask {subtask_id}: {valid_attachment_ids}"
+    )

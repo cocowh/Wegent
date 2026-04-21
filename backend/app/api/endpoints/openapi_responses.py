@@ -50,114 +50,6 @@ from app.utils.prompt_utils import extract_display_prompt
 
 logger = logging.getLogger(__name__)
 
-
-def _validate_and_link_attachments(
-    db: Session,
-    user: User,
-    attachment_ids: list[int],
-    setup: Any,
-) -> None:
-    """Validate attachment ownership and link attachments to subtask.
-
-    Validates that:
-    - Attachments belong to the current user
-    - Attachments are of type ATTACHMENT
-    - Attachments are in READY status
-    - Attachments are either unlinked or already linked to the same task
-
-    This prevents attachments from being "stolen" from other active conversations
-    while still allowing retry scenarios within the same task.
-
-    Args:
-        db: Database session
-        user: Current authenticated user
-        attachment_ids: List of attachment IDs to validate and link
-        setup: Chat session setup containing task and subtask info
-
-    Raises:
-        HTTPException: 403 if any attachment IDs are invalid or unauthorized
-    """
-    from sqlalchemy import or_, select
-
-    from app.models.subtask import Subtask
-    from app.models.subtask_context import ContextType, SubtaskContext
-    from shared.models.db import ContextStatus
-
-    # Get the task ID from the setup
-    task_id = setup.task.id
-
-    # Build subquery: find all subtask IDs belonging to the same task
-    task_subtask_ids = (
-        select(Subtask.id)
-        .filter(Subtask.task_id == task_id, Subtask.user_id == user.id)
-        .scalar_subquery()
-    )
-
-    # Validate attachment ownership and state with row locking
-    # Only allow attachments that are:
-    # 1. Unlinked (subtask_id == 0), OR
-    # 2. Already linked to a subtask in the same task
-    valid_attachment_rows = (
-        db.query(SubtaskContext.id)
-        .filter(
-            SubtaskContext.id.in_(attachment_ids),
-            SubtaskContext.user_id == user.id,
-            SubtaskContext.context_type == ContextType.ATTACHMENT.value,
-            SubtaskContext.status == ContextStatus.READY.value,
-            or_(
-                SubtaskContext.subtask_id == 0,  # Unlinked
-                SubtaskContext.subtask_id.in_(task_subtask_ids),  # Same task
-            ),
-        )
-        .with_for_update()
-        .all()
-    )
-    valid_attachment_ids = [row[0] for row in valid_attachment_rows]
-
-    # Check if any requested IDs are invalid or don't belong to the user
-    invalid_ids = set(attachment_ids) - set(valid_attachment_ids)
-    if invalid_ids:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Invalid or unauthorized attachment IDs: {sorted(invalid_ids)}",
-        )
-
-    # Perform the linking using a conditional update that includes predicates
-    # This ensures atomic validation+linking and provides feedback on affected rows
-    from sqlalchemy import update
-
-    update_stmt = (
-        update(SubtaskContext)
-        .where(
-            SubtaskContext.id.in_(valid_attachment_ids),
-            SubtaskContext.user_id == user.id,
-            SubtaskContext.context_type == ContextType.ATTACHMENT.value,
-            SubtaskContext.status == ContextStatus.READY.value,
-            or_(
-                SubtaskContext.subtask_id == 0,
-                SubtaskContext.subtask_id.in_(task_subtask_ids),
-            ),
-        )
-        .values(subtask_id=setup.user_subtask.id)
-    )
-    result = db.execute(update_stmt)
-
-    # Verify all expected rows were updated
-    if result.rowcount != len(valid_attachment_ids):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Some attachments could not be linked. Please retry.",
-        )
-
-    # Note: We intentionally do NOT commit here.
-    # The transaction must remain open to keep the row locks held by with_for_update()
-    # until build_execution_request() has loaded the attachment contexts.
-    # The caller is responsible for committing after the execution request is built.
-    logger.info(
-        f"[OPENAPI] Linked {result.rowcount} attachments to subtask {setup.user_subtask.id}: {valid_attachment_ids}"
-    )
-
-
 router = APIRouter()
 
 # Get rate limiter instance
@@ -503,12 +395,23 @@ async def _create_non_streaming_response_unified(
 
     # Link attachments to user subtask if provided
     if request_body.attachment_ids:
-        _validate_and_link_attachments(
-            db=db,
-            user=user,
-            attachment_ids=request_body.attachment_ids,
-            setup=setup,
-        )
+        from app.services.chat.preprocessing import link_contexts_to_subtask
+
+        try:
+            link_contexts_to_subtask(
+                db=db,
+                subtask_id=setup.user_subtask.id,
+                user_id=user.id,
+                attachment_ids=request_body.attachment_ids,
+                contexts=None,
+                task=setup.task,
+                user_name=None,
+            )
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=str(e),
+            )
 
     # Convert reasoning config from Pydantic model to dict
     reasoning_config = None
@@ -810,12 +713,23 @@ async def _create_streaming_response_unified(
 
     # Link attachments to user subtask if provided
     if request_body.attachment_ids:
-        _validate_and_link_attachments(
-            db=db,
-            user=user,
-            attachment_ids=request_body.attachment_ids,
-            setup=setup,
-        )
+        from app.services.chat.preprocessing import link_contexts_to_subtask
+
+        try:
+            link_contexts_to_subtask(
+                db=db,
+                subtask_id=setup.user_subtask.id,
+                user_id=user.id,
+                attachment_ids=request_body.attachment_ids,
+                contexts=None,
+                task=setup.task,
+                user_name=None,
+            )
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=str(e),
+            )
 
     # Convert reasoning config from Pydantic model to dict
     reasoning_config = None
