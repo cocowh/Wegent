@@ -6,6 +6,7 @@
 Knowledge base and document service using kinds table.
 """
 
+import logging
 from dataclasses import dataclass
 from typing import Optional
 
@@ -55,6 +56,9 @@ from app.services.knowledge.permission_policy import (
     can_manage_accessible_knowledge_base_documents,
     can_manage_accessible_knowledge_document,
 )
+from app.services.readers.kb_permissions import kb_permission_resolver
+
+logger = logging.getLogger(__name__)
 
 
 def _build_attachment_filename(name: str, file_extension: str) -> str:
@@ -420,12 +424,26 @@ class KnowledgeService:
             # Get knowledge bases bound to group chats where user is a member
             bound_kb_ids = KnowledgeService._get_bound_kb_ids_for_user(db, user_id)
 
-            # Single query to get personal, team, organization, shared, and bound knowledge bases
-            # Personal: user_id matches and namespace is "default"
-            # Team: namespace is in accessible_groups
+            # External resolver: returns additional KB IDs the user can access
+            # via extension rules (e.g. department / employee bindings).
+            # Errors are caught so a faulty extension cannot break the core listing path.
+            try:
+                ext_kb_ids = kb_permission_resolver.get_accessible_kb_ids(db, user_id)
+            except Exception as e:
+                logger.warning(
+                    f"kb_permissions extension get_accessible_kb_ids failed: {e}; "
+                    "falling back to empty list"
+                )
+                ext_kb_ids = []
+
+            # Single query to get personal, team, organization, shared, bound, and
+            # externally-accessible knowledge bases.
+            # Personal:  user_id matches and namespace is "default"
+            # Team:      namespace is in accessible_groups
             # Organization: namespace has level='organization'
-            # Shared: id is in shared_kb_ids
-            # Bound: id is in bound_kb_ids (personal KBs bound to group chats)
+            # Shared:    id is in shared_kb_ids
+            # Bound:     id is in bound_kb_ids (personal KBs bound to group chats)
+            # External:  id is in ext_kb_ids (e.g. department / employee bindings)
             query = db.query(Kind).filter(
                 Kind.kind == "KnowledgeBase",
                 Kind.is_active == True,
@@ -444,6 +462,9 @@ class KnowledgeService:
 
             if bound_kb_ids:
                 conditions.append(Kind.id.in_(bound_kb_ids))
+
+            if ext_kb_ids:
+                conditions.append(Kind.id.in_(ext_kb_ids))
 
             if conditions:
                 from sqlalchemy import or_
@@ -2027,7 +2048,9 @@ class KnowledgeService:
             return True, BaseRole.Owner, False
 
         has_access, role, is_creator = knowledge_share_service.get_user_kb_permission(
-            db, knowledge_base_id, user_id
+            db,
+            knowledge_base_id,
+            user_id,
         )
 
         effective_role = BaseRole(role) if role is not None else None
