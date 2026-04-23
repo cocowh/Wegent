@@ -81,16 +81,10 @@ def test_create_resolver_returns_default_when_no_extension(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When SERVICE_EXTENSION is empty, _create_resolver returns DefaultKbPermissionResolver."""
-    with patch("app.services.readers.kb_permissions.importlib") as _mock_importlib:
-        with patch("app.core.config.settings") as mock_settings:
-            mock_settings.SERVICE_EXTENSION = ""
-            # Re-import to pick up the patched settings
-            from app.services.readers import kb_permissions
+    from app.core.config import settings
 
-            with patch.object(kb_permissions, "_create_resolver") as mock_create:
-                mock_create.return_value = DefaultKbPermissionResolver()
-                result = mock_create()
-
+    monkeypatch.setattr(settings, "SERVICE_EXTENSION", "")
+    result = _create_resolver()
     assert isinstance(result, DefaultKbPermissionResolver)
 
 
@@ -237,7 +231,7 @@ def test_get_user_kb_permission_calls_external_resolver_as_last_resort(
     test_db: Session,
 ) -> None:
     """
-    When all built-in checks deny access, kbPermissionResolver.resolve is called
+    When all built-in checks deny access, kb_permission_resolver.resolve is called
     and its returned role is used.
     """
     from unittest.mock import MagicMock, patch
@@ -263,9 +257,7 @@ def test_get_user_kb_permission_calls_external_resolver_as_last_resort(
         patch.object(_kss_module, "is_organization_namespace", return_value=False),
         patch.object(_kss_module, "is_restricted_analyst", return_value=False),
     ):
-        # Simulate KB query returning mock_kb
-        mock_query.return_value.filter.return_value.first.return_value = mock_kb
-        # Simulate no explicit permission
+        # KB lookup returns mock_kb, subsequent explicit-permission lookup returns None
         mock_query.return_value.filter.return_value.first.side_effect = [
             mock_kb,  # KB lookup
             None,  # no explicit ResourceMember
@@ -287,7 +279,7 @@ def test_get_user_kb_permission_external_resolver_not_called_when_creator(
     test_db: Session,
 ) -> None:
     """
-    When the user is the KB creator, kbPermissionResolver.resolve must NOT be called.
+    When the user is the KB creator, kb_permission_resolver.resolve must NOT be called.
     """
     from unittest.mock import MagicMock, patch
 
@@ -312,7 +304,7 @@ def test_get_user_kb_permission_external_resolver_not_called_when_creator(
     ):
         mock_query.return_value.filter.return_value.first.return_value = mock_kb
 
-        has_access, role, is_creator = service.get_user_kb_permission(
+        has_access, _role, is_creator = service.get_user_kb_permission(
             db, knowledge_base_id=55, user_id=7
         )
 
