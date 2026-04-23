@@ -21,16 +21,19 @@ from types import ModuleType
 from typing import Optional
 from unittest.mock import MagicMock, patch
 
+# Use importlib.import_module to get the actual module object, not the
+# instance exported by app.services.share.__init__.py under the same name.
+_kss_module = importlib.import_module("app.services.share.knowledge_share_service")
+
 import pytest
 from sqlalchemy.orm import Session
 
 from app.services.readers.kb_permissions import (
     DefaultKbPermissionResolver,
     IKbPermissionResolver,
-    _LazyReader,
     _create_resolver,
+    _LazyReader,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -139,12 +142,12 @@ def test_create_resolver_falls_back_on_import_error(
     """ImportError during extension load logs a warning and returns the default resolver."""
     with patch("app.core.config.settings") as mock_settings:
         mock_settings.SERVICE_EXTENSION = "missing_ext"
-        with patch(
-            "importlib.import_module", side_effect=ImportError("no module")
-        ):
+        with patch("importlib.import_module", side_effect=ImportError("no module")):
             import logging
 
-            with caplog.at_level(logging.WARNING, logger="app.services.readers.kb_permissions"):
+            with caplog.at_level(
+                logging.WARNING, logger="app.services.readers.kb_permissions"
+            ):
                 from app.services.readers import kb_permissions
 
                 result = kb_permissions._create_resolver()
@@ -171,7 +174,9 @@ def test_create_resolver_falls_back_on_general_exception(
         with patch("importlib.import_module", return_value=fake_ext):
             import logging
 
-            with caplog.at_level(logging.WARNING, logger="app.services.readers.kb_permissions"):
+            with caplog.at_level(
+                logging.WARNING, logger="app.services.readers.kb_permissions"
+            ):
                 from app.services.readers import kb_permissions
 
                 result = kb_permissions._create_resolver()
@@ -253,23 +258,17 @@ def test_get_user_kb_permission_calls_external_resolver_as_last_resort(
     with (
         patch.object(db, "query") as mock_query,
         patch(
-            "app.services.readers.kb_permissions.kbPermissionResolver"
+            "app.services.readers.kb_permissions.kb_permission_resolver"
         ) as mock_resolver,
-        patch(
-            "app.services.share.knowledge_share_service.is_organization_namespace",
-            return_value=False,
-        ),
-        patch(
-            "app.services.share.knowledge_share_service.is_restricted_analyst",
-            return_value=False,
-        ),
+        patch.object(_kss_module, "is_organization_namespace", return_value=False),
+        patch.object(_kss_module, "is_restricted_analyst", return_value=False),
     ):
         # Simulate KB query returning mock_kb
         mock_query.return_value.filter.return_value.first.return_value = mock_kb
         # Simulate no explicit permission
         mock_query.return_value.filter.return_value.first.side_effect = [
-            mock_kb,   # KB lookup
-            None,      # no explicit ResourceMember
+            mock_kb,  # KB lookup
+            None,  # no explicit ResourceMember
         ]
         # External resolver grants Reporter access
         mock_resolver.resolve.return_value = "Reporter"
@@ -307,12 +306,9 @@ def test_get_user_kb_permission_external_resolver_not_called_when_creator(
     with (
         patch.object(db, "query") as mock_query,
         patch(
-            "app.services.readers.kb_permissions.kbPermissionResolver"
+            "app.services.readers.kb_permissions.kb_permission_resolver"
         ) as mock_resolver,
-        patch(
-            "app.services.share.knowledge_share_service.is_restricted_analyst",
-            return_value=False,
-        ),
+        patch.object(_kss_module, "is_restricted_analyst", return_value=False),
     ):
         mock_query.return_value.filter.return_value.first.return_value = mock_kb
 

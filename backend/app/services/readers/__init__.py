@@ -14,17 +14,17 @@ Usage:
     from app.services.readers.groups import groupReader
     from app.services.readers.group_members import groupMemberReader
     from app.services.readers.shared_teams import sharedTeamReader
-    from app.services.readers.kb_permissions import kbPermissionResolver
+    from app.services.readers.kb_permissions import kb_permission_resolver
 
     bot = kindReader.get_by_name_and_namespace(db, user_id, KindType.BOT, "default", "mybot")
     user = userReader.get_by_id(db, user_id)
     is_member = groupMemberReader.is_member(db, "group-name", user_id)
-    ids = kbPermissionResolver.get_accessible_kb_ids(db, user_id)
+    ids = kb_permission_resolver.get_accessible_kb_ids(db, user_id)
 """
 
 from app.services.readers.group_members import groupMemberReader
 from app.services.readers.groups import groupReader
-from app.services.readers.kb_permissions import kbPermissionResolver
+from app.services.readers.kb_permissions import kb_permission_resolver
 from app.services.readers.kinds import KindType, kindReader
 from app.services.readers.shared_teams import sharedTeamReader
 from app.services.readers.users import userReader
@@ -35,6 +35,6 @@ __all__ = [
     "groupReader",
     "groupMemberReader",
     "sharedTeamReader",
-    "kbPermissionResolver",
+    "kb_permission_resolver",
     "KindType",
 ]
