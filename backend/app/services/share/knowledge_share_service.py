@@ -382,9 +382,9 @@ class KnowledgeShareService(UnifiedShareService):
 
         # External permission resolver (e.g. department / employee bindings).
         # Called last so it never interferes with built-in access control.
-        from app.services.readers.kb_permissions import kbPermissionResolver
+        from app.services.readers.kb_permissions import kb_permission_resolver
 
-        ext_role = kbPermissionResolver.resolve(db, knowledge_base_id, user_id, kb)
+        ext_role = kb_permission_resolver.resolve(db, knowledge_base_id, user_id, kb)
         if ext_role is not None:
             return True, ext_role, False
 

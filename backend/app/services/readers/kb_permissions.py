@@ -171,4 +171,4 @@ class _LazyReader:
 # Export
 # =============================================================================
 
-kbPermissionResolver: IKbPermissionResolver = _LazyReader()  # type: ignore
+kb_permission_resolver: IKbPermissionResolver = _LazyReader()  # type: ignore

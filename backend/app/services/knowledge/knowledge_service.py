@@ -422,9 +422,9 @@ class KnowledgeService:
 
             # External resolver: returns additional KB IDs the user can access
             # via extension rules (e.g. department / employee bindings).
-            from app.services.readers.kb_permissions import kbPermissionResolver
+            from app.services.readers.kb_permissions import kb_permission_resolver
 
-            ext_kb_ids = kbPermissionResolver.get_accessible_kb_ids(db, user_id)
+            ext_kb_ids = kb_permission_resolver.get_accessible_kb_ids(db, user_id)
 
             # Single query to get personal, team, organization, shared, bound, and
             # externally-accessible knowledge bases.
@@ -2038,7 +2038,9 @@ class KnowledgeService:
             return True, BaseRole.Owner, False
 
         has_access, role, is_creator = knowledge_share_service.get_user_kb_permission(
-            db, knowledge_base_id, user_id,
+            db,
+            knowledge_base_id,
+            user_id,
         )
 
         effective_role = BaseRole(role) if role is not None else None
