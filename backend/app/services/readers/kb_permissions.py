@@ -21,7 +21,7 @@ Usage (in extension package, e.g. myext/kb_permissions.py):
             # return list of kb_ids the user can access
             ...
 
-    def create() -> MyResolver:
+    def wrap(base: IKbPermissionResolver) -> MyResolver:
         return MyResolver()
 """
 
@@ -93,26 +93,59 @@ class IKbPermissionResolver(ABC):
 
 
 # =============================================================================
+# Default Implementation
+# =============================================================================
+
+
+class DefaultKbPermissionResolver(IKbPermissionResolver):
+    """
+    No-op resolver used when no extension is configured.
+
+    Always returns None / [] so no extra permissions are granted.
+    """
+
+    def resolve(
+        self,
+        db: Session,
+        kb_id: int,
+        user_id: int,
+        kb: object,
+    ) -> Optional[str]:
+        return None
+
+    def get_accessible_kb_ids(self, db: Session, user_id: int) -> list[int]:
+        return []
+
+
+# =============================================================================
 # Loader
 # =============================================================================
 
 
-def _create_resolver() -> Optional[IKbPermissionResolver]:
-    """Load resolver from SERVICE_EXTENSION if configured."""
+def _create_resolver() -> IKbPermissionResolver:
+    """Create resolver, wrapping with extension if SERVICE_EXTENSION is set."""
     from app.core.config import settings
 
+    base: IKbPermissionResolver = DefaultKbPermissionResolver()
+
     if not settings.SERVICE_EXTENSION:
-        return None
+        return base
+
     try:
         ext = importlib.import_module(f"{settings.SERVICE_EXTENSION}.kb_permissions")
-        resolver = ext.create()
-        logger.info("KB permission resolver extension loaded")
-        return resolver
+        result = ext.wrap(base)
+        if result:
+            logger.info("KB permission resolver extension loaded")
+            return result
     except ImportError:
-        return None
+        logger.warning(
+            "KB permission resolver extension module not found: "
+            f"{settings.SERVICE_EXTENSION}.kb_permissions"
+        )
     except Exception as e:
         logger.warning(f"Failed to load kb_permissions extension: {e}")
-        return None
+
+    return base
 
 
 # =============================================================================
@@ -120,35 +153,22 @@ def _create_resolver() -> Optional[IKbPermissionResolver]:
 # =============================================================================
 
 
-class _LazyResolver:
-    """Lazy-loaded resolver proxy that delegates to the actual resolver."""
+class _LazyReader:
+    """Lazy-loaded resolver proxy that delegates to the actual resolver instance."""
 
-    _instance: Optional[IKbPermissionResolver] = None
-    _initialized: bool = False
+    _instance: IKbPermissionResolver | None = None
 
-    def _get(self) -> Optional[IKbPermissionResolver]:
-        if not self._initialized:
+    def _get(self) -> IKbPermissionResolver:
+        if self._instance is None:
             self._instance = _create_resolver()
-            self._initialized = True
         return self._instance
 
-    def resolve(
-        self, db: Session, kb_id: int, user_id: int, kb: object
-    ) -> Optional[str]:
-        resolver = self._get()
-        if resolver is None:
-            return None
-        return resolver.resolve(db, kb_id, user_id, kb)
-
-    def get_accessible_kb_ids(self, db: Session, user_id: int) -> list[int]:
-        resolver = self._get()
-        if resolver is None:
-            return []
-        return resolver.get_accessible_kb_ids(db, user_id)
+    def __getattr__(self, name: str):
+        return getattr(self._get(), name)
 
 
 # =============================================================================
 # Export
 # =============================================================================
 
-kbPermissionResolver: _LazyResolver = _LazyResolver()
+kbPermissionResolver: IKbPermissionResolver = _LazyReader()  # type: ignore

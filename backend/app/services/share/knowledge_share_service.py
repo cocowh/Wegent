@@ -286,7 +286,6 @@ class KnowledgeShareService(UnifiedShareService):
         db: Session,
         knowledge_base_id: int,
         user_id: int,
-        external_resolver=None,
     ) -> Tuple[bool, Optional[str], bool]:
         """
         Get user's permission for a knowledge base.
@@ -298,11 +297,6 @@ class KnowledgeShareService(UnifiedShareService):
             db:                Database session
             knowledge_base_id: Knowledge base ID
             user_id:           Requesting user ID
-            external_resolver: Optional IKbPermissionResolver instance.  When
-                               provided it is called as the final fallback
-                               before returning False, allowing extensions
-                               (e.g. ERP department bindings) to grant access
-                               without modifying built-in logic.
 
         Returns:
             Tuple of (has_access, role, is_creator)
@@ -386,12 +380,13 @@ class KnowledgeShareService(UnifiedShareService):
                 # User is member of a group chat that has this KB bound
                 return True, ResourceRole.Reporter.value, False
 
-        # External permission resolver (e.g. ERP department / employee bindings).
+        # External permission resolver (e.g. department / employee bindings).
         # Called last so it never interferes with built-in access control.
-        if external_resolver is not None:
-            ext_role = external_resolver.resolve(db, knowledge_base_id, user_id, kb)
-            if ext_role is not None:
-                return True, ext_role, False
+        from app.services.readers.kb_permissions import kbPermissionResolver
+
+        ext_role = kbPermissionResolver.resolve(db, knowledge_base_id, user_id, kb)
+        if ext_role is not None:
+            return True, ext_role, False
 
         return False, None, False
 

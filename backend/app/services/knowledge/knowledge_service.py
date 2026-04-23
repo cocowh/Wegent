@@ -420,8 +420,8 @@ class KnowledgeService:
             # Get knowledge bases bound to group chats where user is a member
             bound_kb_ids = KnowledgeService._get_bound_kb_ids_for_user(db, user_id)
 
-            # External resolver: e.g. ERP department / employee bindings.
-            # Returns additional KB IDs the user can access via extension rules.
+            # External resolver: returns additional KB IDs the user can access
+            # via extension rules (e.g. department / employee bindings).
             from app.services.readers.kb_permissions import kbPermissionResolver
 
             ext_kb_ids = kbPermissionResolver.get_accessible_kb_ids(db, user_id)
@@ -433,7 +433,7 @@ class KnowledgeService:
             # Organization: namespace has level='organization'
             # Shared:    id is in shared_kb_ids
             # Bound:     id is in bound_kb_ids (personal KBs bound to group chats)
-            # External:  id is in ext_kb_ids (e.g. ERP department bindings)
+            # External:  id is in ext_kb_ids (e.g. department / employee bindings)
             query = db.query(Kind).filter(
                 Kind.kind == "KnowledgeBase",
                 Kind.is_active == True,
@@ -2026,7 +2026,6 @@ class KnowledgeService:
     ) -> tuple[bool, BaseRole | None, bool]:
         """Return merged access for the user on the target knowledge base."""
         from app.services.share import knowledge_share_service
-        from app.services.readers.kb_permissions import kbPermissionResolver
 
         knowledge_base = kb or KnowledgeService._get_knowledge_base_record(
             db, knowledge_base_id
@@ -2040,7 +2039,6 @@ class KnowledgeService:
 
         has_access, role, is_creator = knowledge_share_service.get_user_kb_permission(
             db, knowledge_base_id, user_id,
-            external_resolver=kbPermissionResolver,
         )
 
         effective_role = BaseRole(role) if role is not None else None
