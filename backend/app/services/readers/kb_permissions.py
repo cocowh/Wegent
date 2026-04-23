@@ -134,7 +134,12 @@ def _create_resolver() -> IKbPermissionResolver:
     try:
         ext = importlib.import_module(f"{settings.SERVICE_EXTENSION}.kb_permissions")
         result = ext.wrap(base)
-        if result:
+        if result is None:
+            logger.warning(
+                "kb_permissions extension wrap() returned None; "
+                f"using default resolver ({settings.SERVICE_EXTENSION})"
+            )
+        else:
             logger.info("KB permission resolver extension loaded")
             return result
     except ImportError:

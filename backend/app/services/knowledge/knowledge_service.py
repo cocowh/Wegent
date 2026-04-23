@@ -422,9 +422,17 @@ class KnowledgeService:
 
             # External resolver: returns additional KB IDs the user can access
             # via extension rules (e.g. department / employee bindings).
+            # Errors are caught so a faulty extension cannot break the core listing path.
             from app.services.readers.kb_permissions import kb_permission_resolver
 
-            ext_kb_ids = kb_permission_resolver.get_accessible_kb_ids(db, user_id)
+            try:
+                ext_kb_ids = kb_permission_resolver.get_accessible_kb_ids(db, user_id)
+            except Exception as e:
+                logger.warning(
+                    f"kb_permissions extension get_accessible_kb_ids failed: {e}; "
+                    "falling back to empty list"
+                )
+                ext_kb_ids = []
 
             # Single query to get personal, team, organization, shared, bound, and
             # externally-accessible knowledge bases.
