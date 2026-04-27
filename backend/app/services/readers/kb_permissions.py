@@ -148,8 +148,8 @@ def _create_resolver() -> IKbPermissionResolver:
             "KB permission resolver extension module not found: "
             f"{settings.SERVICE_EXTENSION}.kb_permissions"
         )
-    except Exception as e:
-        logger.warning(f"Failed to load kb_permissions extension: {e}")
+    except Exception as e:  # noqa: BLE001 - extension isolation boundary
+        logger.warning("Failed to load kb_permissions extension: %s", e, exc_info=True)
 
     return base
 
