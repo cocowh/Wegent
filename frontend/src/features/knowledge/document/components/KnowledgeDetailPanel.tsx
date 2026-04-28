@@ -24,7 +24,7 @@ import { ChatArea } from '@/features/tasks/components/chat'
 import { DocumentList, type KbGroupInfo } from './DocumentList'
 import { DocumentPanel } from './DocumentPanel'
 import { KnowledgeBaseSummaryCard } from './KnowledgeBaseSummaryCard'
-import { PermissionManagementTab } from '../../permission/components/PermissionManagementTab'
+import { KbPermissionsPanel, type ExtensionTabConfig } from '../../permission/components/KbPermissionsPanel'
 import { useKnowledgePermissions } from '../../permission/hooks/useKnowledgePermissions'
 import { useNamespaceRoleMap } from '../hooks/useNamespaceRoleMap'
 import {
@@ -50,6 +50,8 @@ interface KnowledgeDetailPanelProps {
   onGroupClick?: (groupId: string, groupType?: string) => void
   /** Initial document path to auto-open (from virtual URL path segments) */
   initialDocPath?: string
+  /** Extension tabs for permission management (e.g., ERP department permissions) */
+  permissionExtensionTabs?: ExtensionTabConfig[]
 }
 
 export function KnowledgeDetailPanel({
@@ -60,6 +62,7 @@ export function KnowledgeDetailPanel({
   groupInfo,
   onGroupClick,
   initialDocPath,
+  permissionExtensionTabs = [],
 }: KnowledgeDetailPanelProps) {
   const { t } = useTranslation('knowledge')
   const { user } = useUser()
@@ -261,7 +264,11 @@ export function KnowledgeDetailPanel({
                 </div>
                 {headerActions}
               </div>
-              <PermissionManagementTab kbId={selectedKb.id} />
+              <KbPermissionsPanel
+                kbId={selectedKb.id}
+                canManagePermissions={canManagePermissions}
+                extensionTabs={permissionExtensionTabs}
+              />
             </>
           )}
         </div>
