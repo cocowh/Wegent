@@ -25,6 +25,7 @@ import {
 import { useTranslation } from '@/hooks/useTranslation'
 import type { SummaryModelRef, KnowledgeBaseType, RetrievalConfig } from '@/types/knowledge'
 import { KnowledgeBaseForm } from './KnowledgeBaseForm'
+import type { KnowledgeBaseFormSections } from './KnowledgeBaseForm'
 
 /** Available group for selection */
 export interface AvailableGroup {
@@ -67,6 +68,8 @@ interface CreateKnowledgeBaseDialogProps {
   defaultGroupId?: string
   /** Whether to show group selector (true when creating from "All" page) */
   showGroupSelector?: boolean
+  /** Extra form sections injected at well-defined slot positions */
+  formSections?: KnowledgeBaseFormSections
 }
 
 /** Get icon for group type */
@@ -95,6 +98,7 @@ export function CreateKnowledgeBaseDialog({
   availableGroups,
   defaultGroupId,
   showGroupSelector = false,
+  formSections,
 }: CreateKnowledgeBaseDialogProps) {
   const { t } = useTranslation()
   const [name, setName] = useState('')
@@ -258,6 +262,7 @@ export function CreateKnowledgeBaseDialog({
         </DialogHeader>
         <div className="flex-1 overflow-y-auto space-y-4 py-4">
           <KnowledgeBaseForm
+            extraSections={formSections}
             typeSection={
               <>
                 {/* KB Type selector - subtle style */}

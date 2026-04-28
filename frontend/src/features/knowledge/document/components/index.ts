@@ -25,3 +25,21 @@ export { KnowledgeBaseSummaryCard } from './KnowledgeBaseSummaryCard'
 export { GuidedQuestions } from './GuidedQuestions'
 export { DocumentPanel } from './DocumentPanel'
 export { ChunksSection } from './ChunksSection'
+export type { KnowledgeBaseFormSections } from './KnowledgeBaseForm'
+
+// Component registry for extension support
+export {
+  registerComponents,
+  getComponent,
+  hasComponent,
+  clearRegistry,
+} from './registry'
+export type { ComponentRegistry } from './registry'
+
+// Create KB dialog state for extension support
+export {
+  setCreateKbFormSections,
+  getCreateKbFormSections,
+  setPostCreateHandler,
+  runPostCreateHandler,
+} from './createKbDialogState'

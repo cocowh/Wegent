@@ -50,7 +50,7 @@ const getInitialCollapsed = (storageKey: string, defaultCollapsed: boolean): boo
   return defaultCollapsed
 }
 
-interface DocumentPanelProps {
+export interface DocumentPanelProps {
   knowledgeBase: KnowledgeBase
   canUpload?: boolean
   canManageAllDocuments?: boolean

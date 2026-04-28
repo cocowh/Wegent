@@ -363,6 +363,7 @@
       }
     },
     "permission": {
+      "personal": "个人权限",
       "noAccess": "您没有操作权限",
       "share": "分享",
       "shareLink": "邀请协作",

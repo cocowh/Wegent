@@ -5,14 +5,16 @@
 """
 Knowledge base external permission resolver extension point.
 
-Loaded via SERVICE_EXTENSION mechanism, consistent with the
-groups/group_members reader pattern.
+Loaded via Python entry points mechanism.
 
 Usage (in extension package, e.g. myext/kb_permissions.py):
 
     from app.services.readers.kb_permissions import IKbPermissionResolver
 
     class MyResolver(IKbPermissionResolver):
+        def __init__(self, base: IKbPermissionResolver):
+            self._base = base
+
         def resolve(self, db, kb_id, user_id, kb):
             # return a role string or None
             ...
@@ -21,11 +23,13 @@ Usage (in extension package, e.g. myext/kb_permissions.py):
             # return list of kb_ids the user can access
             ...
 
-    def wrap(base: IKbPermissionResolver) -> MyResolver:
-        return MyResolver()
+Register in pyproject.toml:
+
+    [project.entry-points."wegent.kb_permissions"]
+    my_resolver = "myext.kb_permissions:MyResolver"
 """
 
-import importlib
+import importlib.metadata
 import logging
 import threading
 from abc import ABC, abstractmethod
@@ -34,6 +38,9 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
+
+# Entry point group for KB permission resolvers
+ENTRY_POINT_GROUP = "wegent.kb_permissions"
 
 
 # =============================================================================
@@ -80,7 +87,7 @@ class IKbPermissionResolver(ABC):
         """
         Return knowledge base IDs accessible to the user via external rules.
 
-        Called during list queries to extend the OR conditions.  Return an
+        Called during list queries to extend the OR conditions. Return an
         empty list when there are no additional IDs to include.
 
         Args:
@@ -123,33 +130,57 @@ class DefaultKbPermissionResolver(IKbPermissionResolver):
 # =============================================================================
 
 
-def _create_resolver() -> IKbPermissionResolver:
-    """Create resolver, wrapping with extension if SERVICE_EXTENSION is set."""
-    from app.core.config import settings
+def _load_from_entry_points(
+    base: IKbPermissionResolver,
+) -> Optional[IKbPermissionResolver]:
+    """
+    Load resolver from entry points.
 
-    base: IKbPermissionResolver = DefaultKbPermissionResolver()
+    Args:
+        base: The base resolver to pass to the loaded resolver's constructor.
 
-    if not settings.SERVICE_EXTENSION:
-        return base
+    Returns:
+        The loaded resolver instance, or None if no valid entry point found.
+    """
+    try:
+        entry_points = importlib.metadata.entry_points(group=ENTRY_POINT_GROUP)
+    except TypeError:
+        # Python < 3.10 compatibility
+        all_eps = importlib.metadata.entry_points()
+        entry_points = all_eps.get(ENTRY_POINT_GROUP, [])
+
+    if not entry_points:
+        return None
+
+    # Use the first entry point
+    ep = next(iter(entry_points))
 
     try:
-        ext = importlib.import_module(f"{settings.SERVICE_EXTENSION}.kb_permissions")
-        result = ext.wrap(base)
-        if result is None:
-            logger.warning(
-                "kb_permissions extension wrap() returned None; "
-                f"using default resolver ({settings.SERVICE_EXTENSION})"
+        resolver_class = ep.load()
+
+        if not issubclass(resolver_class, IKbPermissionResolver):
+            logger.error(
+                f"Entry point {ep.name} ({resolver_class}) does not implement IKbPermissionResolver"
             )
-        else:
-            logger.info("KB permission resolver extension loaded")
-            return result
-    except ImportError:
-        logger.warning(
-            "KB permission resolver extension module not found: "
-            f"{settings.SERVICE_EXTENSION}.kb_permissions"
-        )
-    except Exception as e:  # noqa: BLE001 - extension isolation boundary
-        logger.warning("Failed to load kb_permissions extension: %s", e, exc_info=True)
+            return None
+
+        result = resolver_class(base)
+        logger.info(f"KB permission resolver loaded from entry point: {ep.name}")
+        return result
+
+    except Exception as e:
+        logger.warning(f"Failed to load entry point {ep.name}: {e}", exc_info=True)
+        return None
+
+
+def _create_resolver() -> IKbPermissionResolver:
+    """Create resolver, loading from entry points if available."""
+    base: IKbPermissionResolver = DefaultKbPermissionResolver()
+
+    # Try to load from entry points
+    loaded = _load_from_entry_points(base)
+    if loaded is not None:
+        return loaded
 
     return base
 

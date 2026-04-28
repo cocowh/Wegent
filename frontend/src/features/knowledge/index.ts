@@ -32,3 +32,7 @@ export type { ContentWriteSummary, ContentWrite } from './wikiUtils'
 // Document Knowledge exports
 export { KnowledgeDocumentPage } from './document/components'
 export { useKnowledgeBases, useDocuments } from './document/hooks'
+
+// Permission extension exports
+export { KbPermissionsPanel } from './permission/components'
+export type { ExtensionTabConfig } from './permission/components'

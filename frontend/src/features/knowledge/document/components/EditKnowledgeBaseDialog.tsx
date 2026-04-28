@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { KnowledgeBaseForm } from './KnowledgeBaseForm'
+import type { KnowledgeBaseFormSections } from './KnowledgeBaseForm'
 import { ConvertKnowledgeBaseTypeDialog } from './ConvertKnowledgeBaseTypeDialog'
 import { useTranslation } from '@/hooks/useTranslation'
 import { getKnowledgeBase } from '@/apis/knowledge'
@@ -41,6 +42,8 @@ interface EditKnowledgeBaseDialogProps {
   bindModel?: string | null
   /** Callback when knowledge base type is converted */
   onTypeConverted?: (updatedKb: KnowledgeBase) => void
+  /** Extra form sections injected at well-defined slot positions */
+  formSections?: KnowledgeBaseFormSections
 }
 
 export function EditKnowledgeBaseDialog({
@@ -52,6 +55,7 @@ export function EditKnowledgeBaseDialog({
   knowledgeDefaultTeamId,
   bindModel,
   onTypeConverted,
+  formSections,
 }: EditKnowledgeBaseDialogProps) {
   const { t } = useTranslation()
   const { t: tKnowledge } = useTranslation('knowledge')
@@ -224,6 +228,7 @@ export function EditKnowledgeBaseDialog({
           </DialogHeader>
           <div className="flex-1 overflow-y-auto space-y-4 py-4">
             <KnowledgeBaseForm
+              extraSections={formSections}
               name={name}
               description={description}
               onNameChange={value => setName(value)}

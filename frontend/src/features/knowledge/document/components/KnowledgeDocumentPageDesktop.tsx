@@ -25,9 +25,33 @@ import { listKnowledgeBases } from '@/apis/knowledge'
 import { useKnowledgeSidebar, type KnowledgeGroup } from '../hooks/useKnowledgeSidebar'
 import { useNamespaceRoleMap } from '../hooks/useNamespaceRoleMap'
 import { KnowledgeSidebar } from './KnowledgeSidebar'
-import { KnowledgeDetailPanel } from './KnowledgeDetailPanel'
+import {
+  KnowledgeDetailPanel as DefaultKnowledgeDetailPanel,
+  type KnowledgeDetailPanelProps,
+} from './KnowledgeDetailPanel'
+import { getComponent } from './registry'
 import { KnowledgeGroupListPage, type KbDataItem } from './KnowledgeGroupListPage'
+
+/**
+ * Wrapper component that resolves KnowledgeDetailPanel from the registry at render time.
+ *
+ * This exists as a wrapper rather than a module-level getComponent() call so that
+ * external packages calling registerComponents() during app initialization have a
+ * chance to populate the registry before the component is first rendered.
+ *
+ * A module-level getComponent() evaluates when the module is first loaded, which
+ * may occur before registerComponents() has been called — especially in dev mode
+ * with HMR or when module import ordering is non-deterministic.
+ */
+function KnowledgeDetailPanel(props: KnowledgeDetailPanelProps) {
+  const Panel = useMemo(
+    () => getComponent('KnowledgeDetailPanel', DefaultKnowledgeDetailPanel),
+    []
+  )
+  return <Panel {...props} />
+}
 import { CreateKnowledgeBaseDialog, type AvailableGroup } from './CreateKnowledgeBaseDialog'
+import { getCreateKbFormSections, runPostCreateHandler } from './createKbDialogState'
 import { EditKnowledgeBaseDialog } from './EditKnowledgeBaseDialog'
 import { DeleteKnowledgeBaseDialog } from './DeleteKnowledgeBaseDialog'
 import { MigrateKnowledgeBaseDialog, type MigrationTargetGroup } from './MigrateKnowledgeBaseDialog'
@@ -572,7 +596,7 @@ export function KnowledgeDocumentPageDesktop({
 
         // Use the appropriate API based on scope
         const { createKnowledgeBase } = await import('@/apis/knowledge')
-        await createKnowledgeBase({
+        const createdKb = await createKnowledgeBase({
           name: data.name,
           description: data.description,
           namespace,
@@ -584,6 +608,9 @@ export function KnowledgeDocumentPageDesktop({
           max_calls_per_conversation: data.max_calls_per_conversation,
           exempt_calls_before_check: data.exempt_calls_before_check,
         })
+
+        // Invoke registered post-create handler (e.g., external binding setup)
+        await runPostCreateHandler(createdKb.id)
 
         // Save model preference when summary is enabled and model is selected
         if (data.summary_enabled && data.summary_model_ref) {
@@ -1047,6 +1074,7 @@ export function KnowledgeDocumentPageDesktop({
         showGroupSelector={showGroupSelector}
         availableGroups={availableGroupsForCreate}
         defaultGroupId="personal"
+        formSections={getCreateKbFormSections()}
       />
       <EditKnowledgeBaseDialog
         open={!!editingKb}
