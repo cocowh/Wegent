@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -44,10 +44,10 @@ async def test_retrieve_for_chat_shell_no_longer_persists_subtask_context():
     mock_update_context = MagicMock()
 
     with patch.multiple(
-        context_service,
-        get_knowledge_base_context_map_by_subtask=mock_get_context_map,
-        create_knowledge_base_context_with_result=mock_create_context,
-        update_knowledge_base_retrieval_result=mock_update_context,
+            context_service,
+            get_knowledge_base_context_map_by_subtask=mock_get_context_map,
+            create_knowledge_base_context_with_result=mock_create_context,
+            update_knowledge_base_retrieval_result=mock_update_context,
     ):
         result = await service.retrieve_with_routing(
             query="test",
@@ -69,85 +69,70 @@ class TestGetAllChunksFromKnowledgeBase:
     @pytest.mark.asyncio
     async def test_get_all_chunks_without_user_auth_check(self):
         """Internal all-chunks should work without passing a request user."""
+        from app.services.rag import gateway_factory
         from app.services.rag.retrieval_service import RetrievalService
-        from shared.models import (
-            RemoteKnowledgeBaseQueryConfig,
-            RuntimeEmbeddingModelConfig,
-            RuntimeRetrievalConfig,
-            RuntimeRetrieverConfig,
+        from app.services.rag.runtime_specs import ListChunksRuntimeSpec
+        from shared.models import RuntimeRetrieverConfig
+
+        retriever_config = RuntimeRetrieverConfig(
+            name="retriever-a",
+            namespace="default",
+            storage_config={"type": "qdrant", "url": "http://qdrant:6333"},
         )
-
-        kb = MagicMock()
-        kb.id = 123
-        kb.name = "KB"
-        kb.namespace = "team-a"
-        kb.user_id = 42
-        kb.json = {
-            "spec": {
-                "retrievalConfig": {
-                    "retriever_name": "retriever-a",
-                    "retriever_namespace": "default",
-                }
-            }
-        }
-
-        db = MagicMock()
-        db.query.return_value.filter.return_value.first.return_value = kb
-
-        mock_backend = MagicMock()
-        mock_backend.get_index_name.return_value = "kb-index"
-        mock_backend.get_all_chunks.return_value = [
-            {"content": "chunk", "title": "doc-1", "doc_ref": "1"}
-        ]
-        runtime_config = RemoteKnowledgeBaseQueryConfig(
+        spec = ListChunksRuntimeSpec(
             knowledge_base_id=123,
             index_owner_user_id=42,
-            retriever_config=RuntimeRetrieverConfig(
-                name="retriever-a",
-                namespace="default",
-                storage_config={"type": "qdrant", "url": "http://qdrant:6333"},
-            ),
-            embedding_model_config=RuntimeEmbeddingModelConfig(
-                model_name="embed-a",
-                model_namespace="default",
-                resolved_config={"protocol": "openai"},
-            ),
-            retrieval_config=RuntimeRetrievalConfig(top_k=20),
+            retriever_config=retriever_config,
+            max_chunks=50,
+            query="debug query",
+            metadata_condition=None,
+        )
+
+        mock_gateway = MagicMock()
+        mock_gateway.list_chunks = AsyncMock(
+            return_value={
+                "chunks": [{"content": "chunk", "title": "doc-1", "doc_ref": "1"}],
+                "total": 1,
+            }
         )
 
         with (
             patch(
-                "app.services.rag.retrieval_service.RagRuntimeResolver.build_query_knowledge_base_configs",
-                return_value=[runtime_config],
-            ) as mock_build_runtime_configs,
-            patch(
-                "app.services.rag.retrieval_service.create_storage_backend_from_runtime_config",
-                return_value=mock_backend,
-            ) as mock_create_storage_backend,
+                "app.services.rag.retrieval_service.RagRuntimeResolver.build_internal_list_chunks_runtime_spec",
+                return_value=spec,
+            ) as mock_build_spec,
+            patch.object(
+                gateway_factory,
+                "get_list_chunks_gateway",
+                return_value=mock_gateway,
+            ) as mock_get_gateway,
         ):
+            db_session = MagicMock()
             result = await RetrievalService().get_all_chunks_from_knowledge_base(
                 knowledge_base_id=123,
-                db=db,
+                db=db_session,
                 max_chunks=50,
                 query="debug query",
             )
 
-        assert result == [{"content": "chunk", "title": "doc-1", "doc_ref": "1"}]
-        mock_build_runtime_configs.assert_called_once_with(
-            db=db,
-            knowledge_base_ids=[123],
-            user_name=None,
-        )
-        mock_create_storage_backend.assert_called_once_with(
-            runtime_config.retriever_config
-        )
-        mock_backend.get_index_name.assert_called_once_with("123", user_id=42)
-        mock_backend.get_all_chunks.assert_called_once_with(
-            knowledge_id="123",
+        assert result == [
+            {
+                "content": "chunk",
+                "title": "doc-1",
+                "chunk_id": None,
+                "doc_ref": "1",
+                "metadata": None,
+            }
+        ]
+        mock_build_spec.assert_called_once_with(
+            db=db_session,
+            knowledge_base_id=123,
             max_chunks=50,
-            user_id=42,
+            query="debug query",
             metadata_condition=None,
         )
+        mock_get_gateway.assert_called_once()
+        mock_gateway.list_chunks.assert_awaited_once_with(spec, db=db_session)
 
 
 @pytest.mark.unit
@@ -191,24 +176,25 @@ class TestRetrieveForChatShell:
 
     @pytest.mark.asyncio
     async def test_auto_route_returns_direct_injection_records(self):
-        """Backend should route to all-chunks when KB estimate fits context."""
+        """Backend should route to original documents when KB estimate fits context."""
         from app.services.rag.retrieval_service import RetrievalService
 
         db = MagicMock()
 
         with patch.object(
-            RetrievalService,
-            "_estimate_total_tokens_for_knowledge_bases",
-            return_value=100,
+                RetrievalService,
+                "_estimate_total_tokens_for_knowledge_bases",
+                return_value=100,
         ) as mock_estimate:
             service = RetrievalService()
-            service.get_all_chunks_from_knowledge_base = AsyncMock(
+            service.get_original_documents_from_knowledge_base = AsyncMock(
                 return_value=[
                     {
-                        "content": "chunk",
+                        "content": "full document content",
+                        "score": 1.0,
                         "title": "doc-1",
-                        "doc_ref": "1",
-                        "metadata": {"page": 1},
+                        "metadata": {"document_id": 1, "total_length": 100},
+                        "knowledge_base_id": 123,
                     }
                 ]
             )
@@ -234,7 +220,7 @@ class TestRetrieveForChatShell:
 
     @pytest.mark.asyncio
     async def test_auto_route_falls_back_to_rag_when_runtime_budget_is_insufficient(
-        self,
+            self,
     ):
         """Backend should own the final fit check when runtime budget is provided."""
         from app.services.rag.retrieval_service import RetrievalService
@@ -242,18 +228,19 @@ class TestRetrieveForChatShell:
         db = MagicMock()
 
         with patch.object(
-            RetrievalService,
-            "_estimate_total_tokens_for_knowledge_bases",
-            return_value=100,
+                RetrievalService,
+                "_estimate_total_tokens_for_knowledge_bases",
+                return_value=100,
         ):
             service = RetrievalService()
-            service.get_all_chunks_from_knowledge_base = AsyncMock(
+            service.get_original_documents_from_knowledge_base = AsyncMock(
                 return_value=[
                     {
-                        "content": "This is a direct injection candidate chunk with enough text to exceed the runtime budget.",
+                        "content": "This is a full document with enough text to exceed the runtime budget.",
+                        "score": 1.0,
                         "title": "doc-1",
-                        "doc_ref": "1",
-                        "metadata": {"page": 1},
+                        "metadata": {"document_id": 1, "total_length": 100},
+                        "knowledge_base_id": 123,
                     }
                 ]
             )
@@ -288,24 +275,26 @@ class TestRetrieveForChatShell:
 
     @pytest.mark.asyncio
     async def test_force_direct_route_respects_max_direct_chunks(self):
-        """Forced direct route should still fallback when chunk cap is exceeded."""
+        """Forced direct route should still fallback when document cap is exceeded."""
         from app.services.rag.retrieval_service import RetrievalService
 
         db = MagicMock()
         service = RetrievalService()
-        service.get_all_chunks_from_knowledge_base = AsyncMock(
+        service.get_original_documents_from_knowledge_base = AsyncMock(
             return_value=[
                 {
-                    "content": "chunk-1",
+                    "content": "document-1",
+                    "score": 1.0,
                     "title": "doc-1",
-                    "doc_ref": "1",
-                    "metadata": {"page": 1},
+                    "metadata": {"document_id": 1, "total_length": 100},
+                    "knowledge_base_id": 123,
                 },
                 {
-                    "content": "chunk-2",
+                    "content": "document-2",
+                    "score": 1.0,
                     "title": "doc-2",
-                    "doc_ref": "2",
-                    "metadata": {"page": 2},
+                    "metadata": {"document_id": 2, "total_length": 100},
+                    "knowledge_base_id": 123,
                 },
             ]
         )
@@ -341,21 +330,22 @@ class TestRetrieveForChatShell:
 
         db = MagicMock()
         service = RetrievalService()
-        service.get_all_chunks_from_knowledge_base = AsyncMock(
+        service.get_original_documents_from_knowledge_base = AsyncMock(
             return_value=[
                 {
-                    "content": "chunk",
+                    "content": "full document content",
+                    "score": 1.0,
                     "title": "doc-1",
-                    "doc_ref": "1",
-                    "metadata": {"page": 1},
+                    "metadata": {"document_id": 1, "total_length": 100},
+                    "knowledge_base_id": 123,
                 }
             ]
         )
 
         with patch.object(
-            RetrievalService,
-            "_estimate_total_tokens_for_knowledge_bases",
-            return_value=100,
+                RetrievalService,
+                "_estimate_total_tokens_for_knowledge_bases",
+                return_value=100,
         ) as mock_estimate:
             result = await service.retrieve_with_routing(
                 query="test",
@@ -376,7 +366,7 @@ class TestRetrieveForChatShell:
         assert result["records"][0]["knowledge_base_id"] == 123
 
     def test_decide_route_mode_for_chat_shell_returns_rag_retrieval_without_budget(
-        self,
+            self,
     ):
         from app.services.rag.retrieval_service import RetrievalService
 
@@ -394,7 +384,7 @@ class TestRetrieveForChatShell:
         assert result == "rag_retrieval"
 
     def test_decide_route_mode_for_chat_shell_returns_direct_injection_when_auto_fits(
-        self,
+            self,
     ):
         from app.services.rag.retrieval_service import RetrievalService
 
@@ -402,9 +392,9 @@ class TestRetrieveForChatShell:
         db = MagicMock()
 
         with patch.object(
-            RetrievalService,
-            "_estimate_total_tokens_for_knowledge_bases",
-            return_value=100,
+                RetrievalService,
+                "_estimate_total_tokens_for_knowledge_bases",
+                return_value=100,
         ) as mock_estimate:
             result = service.decide_route_mode_for_chat_shell(
                 query="test",
@@ -423,7 +413,7 @@ class TestRetrieveForChatShell:
         assert result == "direct_injection"
 
     def test_decide_route_mode_for_chat_shell_skips_direct_injection_when_auto_disabled(
-        self, monkeypatch
+            self, monkeypatch
     ):
         from app.core.config import settings
         from app.services.rag.retrieval_service import RetrievalService
@@ -439,9 +429,9 @@ class TestRetrieveForChatShell:
         db = MagicMock()
 
         with patch.object(
-            RetrievalService,
-            "_estimate_total_tokens_for_knowledge_bases",
-            return_value=100,
+                RetrievalService,
+                "_estimate_total_tokens_for_knowledge_bases",
+                return_value=100,
         ) as mock_estimate:
             result = service.decide_route_mode_for_chat_shell(
                 query="test",
@@ -461,9 +451,9 @@ class TestRetrieveForChatShell:
         db = MagicMock()
 
         with patch.object(
-            RetrievalService,
-            "_estimate_total_tokens_for_knowledge_bases",
-            return_value=100,
+                RetrievalService,
+                "_estimate_total_tokens_for_knowledge_bases",
+                return_value=100,
         ):
             result = service.decide_route_mode_for_chat_shell(
                 query="test",
@@ -479,7 +469,7 @@ class TestRetrieveForChatShell:
         assert result == "rag_retrieval"
 
     def test_decide_route_mode_for_chat_shell_forces_rag_when_metadata_filter_exists(
-        self,
+            self,
     ):
         from app.services.rag.retrieval_service import RetrievalService
 
@@ -706,7 +696,7 @@ class TestRetrieveForChatShell:
 
     @pytest.mark.asyncio
     async def test_force_rag_route_uses_knowledge_engine_query_executor_when_runtime_configs_are_available(
-        self,
+            self,
     ):
         """Resolved runtime configs should drive the engine query seam in local mode."""
         from app.services.rag.retrieval_service import RetrievalService

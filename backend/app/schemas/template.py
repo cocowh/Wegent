@@ -17,6 +17,16 @@ from pydantic import BaseModel, Field
 # --- Template resource sub-configs ---
 
 
+class TemplateResourceSkillRef(BaseModel):
+    """Precise skill reference for template-defined Ghost skills."""
+
+    name: str = Field(..., description="Skill name")
+    namespace: str = Field("default", description="Skill namespace")
+    user_id: int = Field(
+        ..., description="Skill owner user_id. Use 0 for public/system skills"
+    )
+
+
 class TemplateResourceGhostConfig(BaseModel):
     """Ghost resource configuration within a template."""
 
@@ -24,7 +34,20 @@ class TemplateResourceGhostConfig(BaseModel):
     mcpServers: Optional[Dict[str, Any]] = Field(
         None, description="MCP server configurations"
     )
-    skills: Optional[List[str]] = Field(None, description="Skill names to attach")
+    skillRefs: Optional[List[TemplateResourceSkillRef]] = Field(
+        None,
+        description=(
+            "Precise skill references using name + namespace + userId. "
+            "Use this to avoid ambiguous skill resolution."
+        ),
+    )
+    preloadSkillRefs: Optional[List[TemplateResourceSkillRef]] = Field(
+        None,
+        description=(
+            "Precise preload skill references using name + namespace + userId. "
+            "Use this to avoid ambiguous skill resolution."
+        ),
+    )
 
 
 class TemplateResourceBotConfig(BaseModel):
