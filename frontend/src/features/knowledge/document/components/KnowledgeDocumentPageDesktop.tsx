@@ -32,6 +32,7 @@ import { KnowledgeGroupListPage, type KbDataItem } from './KnowledgeGroupListPag
 // Use registered component if available, otherwise use default
 const KnowledgeDetailPanel = getComponent('KnowledgeDetailPanel', DefaultKnowledgeDetailPanel)
 import { CreateKnowledgeBaseDialog, type AvailableGroup } from './CreateKnowledgeBaseDialog'
+import { getCreateKbFormSections, runPostCreateHandler } from './createKbDialogState'
 import { EditKnowledgeBaseDialog } from './EditKnowledgeBaseDialog'
 import { DeleteKnowledgeBaseDialog } from './DeleteKnowledgeBaseDialog'
 import { MigrateKnowledgeBaseDialog, type MigrationTargetGroup } from './MigrateKnowledgeBaseDialog'
@@ -576,7 +577,7 @@ export function KnowledgeDocumentPageDesktop({
 
         // Use the appropriate API based on scope
         const { createKnowledgeBase } = await import('@/apis/knowledge')
-        await createKnowledgeBase({
+        const createdKb = await createKnowledgeBase({
           name: data.name,
           description: data.description,
           namespace,
@@ -588,6 +589,9 @@ export function KnowledgeDocumentPageDesktop({
           max_calls_per_conversation: data.max_calls_per_conversation,
           exempt_calls_before_check: data.exempt_calls_before_check,
         })
+
+        // Invoke registered post-create handler (e.g., external binding setup)
+        await runPostCreateHandler(createdKb.id)
 
         // Save model preference when summary is enabled and model is selected
         if (data.summary_enabled && data.summary_model_ref) {
@@ -1051,6 +1055,7 @@ export function KnowledgeDocumentPageDesktop({
         showGroupSelector={showGroupSelector}
         availableGroups={availableGroupsForCreate}
         defaultGroupId="personal"
+        formSections={getCreateKbFormSections()}
       />
       <EditKnowledgeBaseDialog
         open={!!editingKb}
