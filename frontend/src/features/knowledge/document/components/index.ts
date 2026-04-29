@@ -25,6 +25,7 @@ export { KnowledgeBaseSummaryCard } from './KnowledgeBaseSummaryCard'
 export { GuidedQuestions } from './GuidedQuestions'
 export { DocumentPanel } from './DocumentPanel'
 export { ChunksSection } from './ChunksSection'
+export type { KnowledgeBaseFormSections } from './KnowledgeBaseForm'
 
 // Component registry for extension support
 export {
