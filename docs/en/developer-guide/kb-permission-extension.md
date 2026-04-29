@@ -177,24 +177,27 @@ Implement the `IKbPermissionResolver` interface in your backend:
 from app.services.readers.kb_permissions import IKbPermissionResolver
 
 class DepartmentPermissionResolver(IKbPermissionResolver):
+    def __init__(self, base: IKbPermissionResolver):
+        self._base = base
+
     def resolve(self, db, kb_id, user_id, kb):
         # Check if user has access via department
         if self._has_department_access(db, kb_id, user_id):
             return "Developer"
-        return None
+        return self._base.resolve(db, kb_id, user_id, kb)
 
     def get_accessible_kb_ids(self, db, user_id):
         # Return KB IDs accessible via department
-        return self._get_dept_accessible_kbs(db, user_id)
-
-def wrap(base: IKbPermissionResolver) -> DepartmentPermissionResolver:
-    return DepartmentPermissionResolver()
+        dept_ids = self._get_dept_accessible_kbs(db, user_id)
+        base_ids = self._base.get_accessible_kb_ids(db, user_id)
+        return list(set(dept_ids + base_ids))
 ```
 
-Configure the extension via environment variable:
+Register the extension via Python entry points in your `pyproject.toml`:
 
-```bash
-SERVICE_EXTENSION=app.extensions.myext
+```toml
+[project.entry-points."wegent.kb_permissions"]
+department = "app.extensions.myext.kb_permissions:DepartmentPermissionResolver"
 ```
 
 ## Examples
@@ -287,7 +290,7 @@ const extensionTabs: ExtensionTabConfig[] = [
 ### Permission Not Applied
 
 - Verify the backend `IKbPermissionResolver` implementation
-- Check that `SERVICE_EXTENSION` environment variable is set
+- Check that the entry point is correctly registered in `pyproject.toml`
 - Review backend logs for extension loading errors
 
 ### Type Errors

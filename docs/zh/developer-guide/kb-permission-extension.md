@@ -177,24 +177,27 @@ export function ExtendedKnowledgeDetailPanel(props: ExtendedKnowledgeDetailPanel
 from app.services.readers.kb_permissions import IKbPermissionResolver
 
 class DepartmentPermissionResolver(IKbPermissionResolver):
+    def __init__(self, base: IKbPermissionResolver):
+        self._base = base
+
     def resolve(self, db, kb_id, user_id, kb):
         # 检查用户是否通过部门拥有访问权限
         if self._has_department_access(db, kb_id, user_id):
             return "Developer"
-        return None
+        return self._base.resolve(db, kb_id, user_id, kb)
 
     def get_accessible_kb_ids(self, db, user_id):
         # 返回通过部门可访问的 KB ID
-        return self._get_dept_accessible_kbs(db, user_id)
-
-def wrap(base: IKbPermissionResolver) -> DepartmentPermissionResolver:
-    return DepartmentPermissionResolver()
+        dept_ids = self._get_dept_accessible_kbs(db, user_id)
+        base_ids = self._base.get_accessible_kb_ids(db, user_id)
+        return list(set(dept_ids + base_ids))
 ```
 
-通过环境变量配置扩展：
+在 `pyproject.toml` 中通过 Python entry points 注册扩展：
 
-```bash
-SERVICE_EXTENSION=app.extensions.myext
+```toml
+[project.entry-points."wegent.kb_permissions"]
+department = "app.extensions.myext.kb_permissions:DepartmentPermissionResolver"
 ```
 
 ## 示例
@@ -287,7 +290,7 @@ const extensionTabs: ExtensionTabConfig[] = [
 ### 权限未应用
 
 - 验证后端 `IKbPermissionResolver` 实现
-- 检查 `SERVICE_EXTENSION` 环境变量是否已设置
+- 检查 entry point 是否在 `pyproject.toml` 中正确注册
 - 查看后端日志中的扩展加载错误
 
 ### 类型错误
