@@ -29,6 +29,12 @@ interface KnowledgeBaseFormProps {
   description: string
   onNameChange: (value: string) => void
   onDescriptionChange: (value: string) => void
+  /**
+   * Optional authorization section injected by external extensions.
+   * Rendered between the description and summary settings sections.
+   * Used by internal extensions to add user/department/role selection UI.
+   */
+  authorizationSection?: ReactNode
   summaryEnabled: boolean
   onSummaryEnabledChange: (value: boolean) => void
   summaryModelRef: SummaryModelRef | null
@@ -67,6 +73,7 @@ export function KnowledgeBaseForm({
   description,
   onNameChange,
   onDescriptionChange,
+  authorizationSection,
   summaryEnabled,
   onSummaryEnabledChange,
   summaryModelRef,
@@ -222,6 +229,8 @@ export function KnowledgeBaseForm({
           data-testid="kb-description-input"
         />
       </div>
+
+      {authorizationSection}
 
       <div className="space-y-3 border-b border-border pb-4">
         <div className="flex items-center justify-between">

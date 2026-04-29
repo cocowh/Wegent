@@ -24,6 +24,7 @@ import {
 } from '@/components/ui/select'
 import { useTranslation } from '@/hooks/useTranslation'
 import type { SummaryModelRef, KnowledgeBaseType, RetrievalConfig } from '@/types/knowledge'
+import { getOptionalComponent } from './registry'
 import { KnowledgeBaseForm } from './KnowledgeBaseForm'
 
 /** Available group for selection */
@@ -121,6 +122,8 @@ export function CreateKnowledgeBaseDialog({
   const [exemptCalls, setExemptCalls] = useState(5)
   // Selected group for creating KB (used when showGroupSelector is true)
   const [selectedGroupId, setSelectedGroupId] = useState<string>(defaultGroupId || 'personal')
+  // Authorization extension data from registered CreateFormAuthorization component
+  const [authorizationData, setAuthorizationData] = useState<Record<string, unknown>>({})
 
   // Reset selectedKbType and selectedGroupId when dialog opens
   useEffect(() => {
@@ -170,7 +173,7 @@ export function CreateKnowledgeBaseDialog({
     try {
       // Filter out empty guided questions
       const validGuidedQuestions = guidedQuestions.filter(q => q.trim().length > 0)
-      await onSubmit({
+      const submitData = {
         name: name.trim(),
         description: description.trim() || undefined,
         retrieval_config: retrievalConfig,
@@ -184,7 +187,15 @@ export function CreateKnowledgeBaseDialog({
         exempt_calls_before_check: exemptCalls,
         selectedGroupId: showGroupSelector ? selectedGroupId : undefined,
         kb_type: selectedKbType,
-      })
+      }
+
+      // Merge authorization extension data if present
+      const hasExtensionData = Object.keys(authorizationData).length > 0
+      await onSubmit(
+        hasExtensionData
+          ? { ...submitData, ...authorizationData }
+          : submitData
+      )
       setName('')
       setDescription('')
       // Reset selectedKbType and keep summaryEnabled as true
@@ -203,6 +214,7 @@ export function CreateKnowledgeBaseDialog({
       })
       setMaxCalls(10)
       setExemptCalls(5)
+      setAuthorizationData({})
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common:error'))
     }
@@ -232,6 +244,7 @@ export function CreateKnowledgeBaseDialog({
       setError('')
       setAccordionValue('')
       setSelectedGroupId(defaultGroupId || 'personal')
+      setAuthorizationData({})
     }
     onOpenChange(newOpen)
   }
@@ -247,6 +260,9 @@ export function CreateKnowledgeBaseDialog({
   // Determine if this is a notebook type
   const isNotebook = selectedKbType === 'notebook'
 
+  // Check for registered authorization form extension
+  const AuthorizationComponent = getOptionalComponent('CreateFormAuthorization')
+
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
@@ -258,6 +274,17 @@ export function CreateKnowledgeBaseDialog({
         </DialogHeader>
         <div className="flex-1 overflow-y-auto space-y-4 py-4">
           <KnowledgeBaseForm
+            authorizationSection={
+              AuthorizationComponent ? (
+                <div className="border-b border-border pb-4">
+                  <AuthorizationComponent
+                    value={authorizationData}
+                    onChange={setAuthorizationData}
+                    kbType={selectedKbType}
+                  />
+                </div>
+              ) : undefined
+            }
             typeSection={
               <>
                 {/* KB Type selector - subtle style */}

@@ -20,9 +20,29 @@
  * ```
  */
 
-import type { ComponentType } from 'react';
+import type { ComponentType, ReactNode } from 'react';
 import type { DocumentPanelProps } from './DocumentPanel';
 import type { KnowledgeDetailPanelProps } from './KnowledgeDetailPanel';
+import type { KnowledgeBaseType } from '@/types/knowledge';
+
+/**
+ * Props for the CreateFormAuthorization component slot.
+ *
+ * This slot allows external packages to inject an authorization section
+ * (e.g., user/department/role selection) into the knowledge base creation dialog.
+ * The component manages its own internal state and communicates changes via the
+ * onChange callback. Returned data is merged into the form's submit payload.
+ */
+export interface CreateFormAuthorizationProps {
+  /** Current authorization data from the registered extension */
+  value: Record<string, unknown>
+  /** Called when authorization data changes, merged into submit payload on save */
+  onChange: (data: Record<string, unknown>) => void
+  /** Current KB type selected in the dialog (notebook or classic) */
+  kbType: KnowledgeBaseType
+  /** Child elements rendered below the authorization section */
+  children?: ReactNode
+}
 
 /**
  * Registry of overridable knowledge document components.
@@ -32,6 +52,12 @@ export interface ComponentRegistry {
   DocumentPanel?: ComponentType<DocumentPanelProps>;
   /** Knowledge detail panel component for classic KB detail view */
   KnowledgeDetailPanel?: ComponentType<KnowledgeDetailPanelProps>;
+  /**
+   * Optional authorization section rendered in the knowledge base creation dialog.
+   * When registered, this component is rendered between the description field and
+   * summary settings. Its data is merged into the submit payload on form submission.
+   */
+  CreateFormAuthorization?: ComponentType<CreateFormAuthorizationProps>;
 }
 
 const registry: ComponentRegistry = {};
@@ -86,6 +112,30 @@ export function getComponent<K extends keyof ComponentRegistry>(
  */
 export function hasComponent<K extends keyof ComponentRegistry>(name: K): boolean {
   return name in registry && registry[name] !== undefined;
+}
+
+/**
+ * Get a registered component without requiring a default fallback.
+ *
+ * Unlike `getComponent`, this function returns `undefined` when no component
+ * has been registered for the given name. This is useful for optional slots
+ * where the absence of a registered component means nothing is rendered.
+ *
+ * @param name - Name of the component to get
+ * @returns The registered component or undefined if not registered
+ *
+ * @example
+ * ```typescript
+ * const AuthorizationComponent = getOptionalComponent('CreateFormAuthorization');
+ * if (AuthorizationComponent) {
+ *   return <AuthorizationComponent value={data} onChange={setData} kbType="notebook" />;
+ * }
+ * ```
+ */
+export function getOptionalComponent<K extends keyof ComponentRegistry>(
+  name: K
+): ComponentRegistry[K] {
+  return registry[name];
 }
 
 /**
