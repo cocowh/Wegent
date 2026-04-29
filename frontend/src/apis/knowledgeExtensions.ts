@@ -11,17 +11,30 @@
  *
  * Usage (in external package):
  * ```typescript
- * import { knowledgeApiExtensions } from '@/apis/knowledgeExtensions';
+ * import {
+ *   bindingProviderRegistry,
+ *   setExternalBindingApi,
+ *   type BindingProvider,
+ * } from '@/apis/knowledgeExtensions';
  *
- * // Register a binding provider
- * knowledgeApiExtensions.registerBindingProvider({
+ * // Register a binding provider (e.g., ERP department search)
+ * bindingProviderRegistry.register({
  *   name: 'erp',
  *   displayName: 'ERP System',
- *   icon: '/icons/erp.svg',
  *   searchable: true,
- *   bindableTypes: ['department', 'employee'],
+ *   bindableTypes: [{ type: 'department', displayName: 'Department', allowMultiple: true }],
  *   search: async (keyword, type) => { ... },
  *   validate: async (externalId, type) => { ... },
+ * });
+ *
+ * // Set the binding API implementation
+ * setExternalBindingApi({
+ *   providers: bindingProviderRegistry,
+ *   search: async (keyword, provider, type) => { ... },
+ *   list: async (kbId, provider) => { ... },
+ *   add: async (kbId, data) => { ... },
+ *   remove: async (kbId, bindingId) => { ... },
+ *   sync: async (kbId, bindingId) => { ... },
  * });
  * ```
  */
@@ -218,7 +231,6 @@ class BindingProviderRegistry {
 
 /**
  * Interface for external binding related operations
- * This replaces the deprecated ErpBindingApi with a more generic approach
  */
 export interface ExternalBindingApi {
   /** Registry for binding providers */
@@ -311,43 +323,3 @@ export function getExternalBindingApi(throwIfMissing = false): ExternalBindingAp
   return externalBindingApi
 }
 
-// ============== Deprecated APIs (for backward compatibility) ==============
-
-/**
- * @deprecated Use ExternalBindingApi with BindingProvider instead
- */
-export interface ErpBindingApi {
-  add: (kbId: number, data: unknown) => Promise<unknown>
-  remove: (kbId: number, bindingId: number) => Promise<void>
-  list: (kbId: number) => Promise<unknown[]>
-}
-
-/**
- * @deprecated Use externalBindingApi instead
- */
-export interface KnowledgeApiExtensions {
-  erpBindingApi?: ErpBindingApi
-}
-
-/**
- * @deprecated Use bindingProviderRegistry instead
- */
-export const knowledgeApiExtensions: KnowledgeApiExtensions = {}
-
-/**
- * @deprecated Use hasExternalBindingApi instead
- */
-export function hasErpBindingApi(): boolean {
-  return knowledgeApiExtensions.erpBindingApi !== undefined
-}
-
-/**
- * @deprecated Use getExternalBindingApi instead
- */
-export function getErpBindingApi(throwIfMissing = false): ErpBindingApi | undefined {
-  const api = knowledgeApiExtensions.erpBindingApi
-  if (throwIfMissing && !api) {
-    throw new Error('ERP binding API is not available. Ensure the ERP extension is registered.')
-  }
-  return api
-}
