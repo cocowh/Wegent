@@ -34,11 +34,24 @@ import {
   KnowledgeBaseSummaryCard,
   getComponent,
 } from '@/features/knowledge/document/components'
+import type { DocumentPanelProps } from '@/features/knowledge/document/components/DocumentPanel'
 import { BoundKnowledgeBaseSummary } from '@/features/tasks/components/group-chat'
 import { taskKnowledgeBaseApi } from '@/apis/task-knowledge-base'
 
-// Use registered component if available, otherwise use default
-const DocumentPanel = getComponent('DocumentPanel', DefaultDocumentPanel)
+/**
+ * Wrapper component that resolves DocumentPanel from the registry at render time.
+ *
+ * This exists as a wrapper rather than a module-level getComponent() call so that
+ * external packages calling registerComponents() during app initialization have a
+ * chance to populate the registry before the component is first rendered.
+ */
+function DocumentPanel(props: DocumentPanelProps) {
+  const Panel = useMemo(
+    () => getComponent('DocumentPanel', DefaultDocumentPanel),
+    []
+  )
+  return <Panel {...props} />
+}
 import {
   canManageKnowledgeBase,
   canManageKnowledgeBaseDocuments,

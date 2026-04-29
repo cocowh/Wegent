@@ -25,12 +25,31 @@ import { listKnowledgeBases } from '@/apis/knowledge'
 import { useKnowledgeSidebar, type KnowledgeGroup } from '../hooks/useKnowledgeSidebar'
 import { useNamespaceRoleMap } from '../hooks/useNamespaceRoleMap'
 import { KnowledgeSidebar } from './KnowledgeSidebar'
-import { KnowledgeDetailPanel as DefaultKnowledgeDetailPanel } from './KnowledgeDetailPanel'
+import {
+  KnowledgeDetailPanel as DefaultKnowledgeDetailPanel,
+  type KnowledgeDetailPanelProps,
+} from './KnowledgeDetailPanel'
 import { getComponent } from './registry'
 import { KnowledgeGroupListPage, type KbDataItem } from './KnowledgeGroupListPage'
 
-// Use registered component if available, otherwise use default
-const KnowledgeDetailPanel = getComponent('KnowledgeDetailPanel', DefaultKnowledgeDetailPanel)
+/**
+ * Wrapper component that resolves KnowledgeDetailPanel from the registry at render time.
+ *
+ * This exists as a wrapper rather than a module-level getComponent() call so that
+ * external packages calling registerComponents() during app initialization have a
+ * chance to populate the registry before the component is first rendered.
+ *
+ * A module-level getComponent() evaluates when the module is first loaded, which
+ * may occur before registerComponents() has been called — especially in dev mode
+ * with HMR or when module import ordering is non-deterministic.
+ */
+function KnowledgeDetailPanel(props: KnowledgeDetailPanelProps) {
+  const Panel = useMemo(
+    () => getComponent('KnowledgeDetailPanel', DefaultKnowledgeDetailPanel),
+    []
+  )
+  return <Panel {...props} />
+}
 import { CreateKnowledgeBaseDialog, type AvailableGroup } from './CreateKnowledgeBaseDialog'
 import { getCreateKbFormSections, runPostCreateHandler } from './createKbDialogState'
 import { EditKnowledgeBaseDialog } from './EditKnowledgeBaseDialog'
