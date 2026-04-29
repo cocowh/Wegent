@@ -7,3 +7,8 @@ export { PermissionManagementTab } from './PermissionManagementTab'
 export { AddUserDialog } from './add-user-dialog'
 export { KbPermissionsPanel } from './KbPermissionsPanel'
 export type { ExtensionTabConfig } from './KbPermissionsPanel'
+export {
+  setRoleSelectComponent,
+  getRoleSelectComponent,
+} from './add-user-form-state'
+export type { RoleSelectComponentProps } from './add-user-form-state'
