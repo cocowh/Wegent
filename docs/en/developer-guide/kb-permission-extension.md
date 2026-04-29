@@ -2,22 +2,232 @@
 sidebar_position: 3
 ---
 
-# Knowledge Base Permission Extension
+# Knowledge Base Extension System
 
-This document describes how to extend the knowledge base permission system with custom permission tabs, such as department-level permissions via external ERP systems.
+This document describes the knowledge base extension system, which provides multiple extension points for integrating external systems (such as ERP, department management, or custom permission systems) without modifying the open-source codebase.
 
 ## Overview
 
-The knowledge base permission system provides an extension point that allows you to add additional permission management tabs beyond the default personal permissions tab. This is useful for integrating with external permission systems like ERP (Enterprise Resource Planning) or other enterprise identity management systems.
+The knowledge base extension system uses a **registry + bridge** pattern: open-source components provide well-defined extension points, and external packages register their implementations during application initialization. This achieves clean separation between open-source and proprietary code.
 
-## Extension Point
+The system includes the following extension mechanisms:
 
-The extension is implemented through the `ExtensionTabConfig` interface and the `KbPermissionsPanel` component.
+| Extension Point | Pattern | Description |
+|----------------|---------|-------------|
+| [Component Registry](#component-registry) | Override | Replace entire components (DocumentPanel, KnowledgeDetailPanel) |
+| [External Binding API](#external-binding-api) | Provider + Bridge | Search, add, remove, and sync external entity bindings |
+| [Permission Extension Tabs](#permission-extension-tabs) | Prop Injection | Add custom permission management tabs |
+| [Create KB Dialog Form Sections](#create-kb-dialog-extension) | State Bridge | Inject form sections at well-defined slot positions |
+| [Post-Creation Hooks](#post-creation-hook) | State Bridge | Run async operations after KB creation |
+| [Custom Role Select](#role-select-extension) | Component Bridge | Replace the role select dropdown in AddUserForm |
+
+## Component Registry
+
+The component registry allows external packages to override entire knowledge document components at runtime.
+
+### Registry Interface
+
+```typescript
+// frontend/src/features/knowledge/document/components/registry.ts
+
+export interface ComponentRegistry {
+  /** Document panel component for notebook KB right panel */
+  DocumentPanel?: ComponentType<DocumentPanelProps>
+  /** Knowledge detail panel component for classic KB detail view */
+  KnowledgeDetailPanel?: ComponentType<KnowledgeDetailPanelProps>
+}
+```
+
+### Registration
+
+Call `registerComponents()` during application initialization, before any components are rendered:
+
+```typescript
+import { registerComponents } from '@/features/knowledge/document/components'
+import { CustomDocumentPanel } from './CustomDocumentPanel'
+
+registerComponents({
+  DocumentPanel: CustomDocumentPanel,
+})
+```
+
+### Resolution
+
+Open-source components use `getComponent()` to resolve registered components at **render time** (not at module load time), giving external packages time to populate the registry first:
+
+```typescript
+import { getComponent } from '@/features/knowledge/document/components'
+import { DocumentPanel as DefaultDocumentPanel } from './DocumentPanel'
+import type { DocumentPanelProps } from './DocumentPanel'
+
+function DocumentPanel(props: DocumentPanelProps) {
+  const Panel = useMemo(
+    () => getComponent('DocumentPanel', DefaultDocumentPanel),
+    []
+  )
+  return <Panel {...props} />
+}
+```
+
+### Utility Functions
+
+```typescript
+/** Check if a component has been registered */
+function hasComponent(name: keyof ComponentRegistry): boolean
+
+/** Clear all registered components (useful for testing) */
+function clearRegistry(): void
+```
+
+## External Binding API
+
+The external binding API allows external packages to bind external system entities (departments, employees, customers, etc.) to knowledge bases.
+
+### Architecture
+
+The binding system consists of two parts:
+
+1. **Binding Provider Registry** — Declares available external systems and their search capabilities
+2. **External Binding API** — Provides CRUD operations for bindings
+
+### Binding Provider Types
+
+```typescript
+// frontend/src/apis/knowledgeExtensions.ts
+
+export interface BindableItem {
+  id: string
+  name: string
+  fullPath?: string    // Hierarchy path, e.g., "Dept A / Team B"
+  avatar?: string
+  metadata?: Record<string, unknown>
+}
+
+export interface BindableTypeConfig {
+  type: string           // e.g., 'department', 'employee', 'customer'
+  displayName: string
+  icon?: string
+  allowMultiple: boolean
+}
+
+export interface BindingProvider {
+  name: string                   // Unique identifier, e.g., 'erp', 'oa'
+  displayName: string
+  icon?: string
+  searchable: boolean
+  bindableTypes: BindableTypeConfig[]
+  search: (keyword: string, type?: string) => Promise<BindingSearchResult>
+  validate: (externalId: string, type: string) => Promise<boolean>
+  getItemDetails?: (externalId: string, type: string) => Promise<BindableItem | null>
+}
+```
+
+### External Binding Data Model
+
+```typescript
+export interface ExternalBinding {
+  id: number
+  kbId: number
+  provider: string
+  bindableType: string
+  externalId: string
+  name: string
+  fullPath?: string
+  avatar?: string
+  metadata?: Record<string, unknown>
+  createdAt: string
+}
+
+export interface ExternalBindingCreate {
+  provider: string
+  bindableType: string
+  externalId: string
+}
+```
+
+### External Binding API Interface
+
+```typescript
+export interface ExternalBindingApi {
+  readonly providers: BindingProviderRegistry
+
+  search: (
+    keyword: string,
+    provider?: string,
+    type?: string
+  ) => Promise<Record<string, BindingSearchResult>>
+
+  list: (kbId: number, provider?: string) => Promise<ExternalBinding[]>
+  add: (kbId: number, data: ExternalBindingCreate) => Promise<ExternalBinding>
+  remove: (kbId: number, bindingId: number) => Promise<void>
+  sync: (kbId: number, bindingId: number) => Promise<void>
+}
+```
+
+### Usage
+
+External packages register providers and set the API implementation during app initialization:
+
+```typescript
+import {
+  bindingProviderRegistry,
+  setExternalBindingApi,
+  type BindingProvider,
+} from '@/apis/knowledgeExtensions'
+
+// Register a binding provider (e.g., ERP department search)
+bindingProviderRegistry.register({
+  name: 'erp',
+  displayName: 'ERP System',
+  searchable: true,
+  bindableTypes: [
+    { type: 'department', displayName: 'Department', allowMultiple: true },
+  ],
+  search: async (keyword, type) => {
+    // Search ERP API for departments/employees
+    return { items: [...], hasMore: false }
+  },
+  validate: async (externalId, type) => {
+    // Validate external ID
+    return true
+  },
+})
+
+// Set the binding API implementation
+setExternalBindingApi({
+  providers: bindingProviderRegistry,
+  search: async (keyword, provider, type) => { /* ... */ },
+  list: async (kbId, provider) => { /* ... */ },
+  add: async (kbId, data) => { /* ... */ },
+  remove: async (kbId, bindingId) => { /* ... */ },
+  sync: async (kbId, bindingId) => { /* ... */ },
+})
+```
+
+### Accessing the API
+
+Open-source components check availability and access the API safely:
+
+```typescript
+import {
+  hasExternalBindingApi,
+  getExternalBindingApi,
+} from '@/apis/knowledgeExtensions'
+
+if (hasExternalBindingApi()) {
+  const api = getExternalBindingApi()
+  const bindings = await api.list(kbId)
+}
+```
+
+## Permission Extension Tabs
+
+The `KbPermissionsPanel` component provides an `extensionTabs` prop to add additional permission management tabs beyond the default personal permissions tab.
 
 ### ExtensionTabConfig Interface
 
 ```typescript
-interface ExtensionTabConfig {
+export interface ExtensionTabConfig {
   /** Unique identifier for this tab */
   id: string
   /** Display label for the tab */
@@ -31,24 +241,13 @@ interface ExtensionTabConfig {
 }
 ```
 
-### Basic Usage
-
-To add a custom permission tab, wrap the `KnowledgeDetailPanel` component and inject your extension tabs:
+### Usage
 
 ```typescript
-'use client'
-
 import { Building2 } from 'lucide-react'
-import { KnowledgeDetailPanel, type ExtensionTabConfig } from '@/features/knowledge'
+import { KbPermissionsPanel, type ExtensionTabConfig } from '@/features/knowledge/permission/components'
 
-// Your custom permission management component
-function DepartmentPermissionTab({ kbId }: { kbId: number }) {
-  // Implement your department permission UI here
-  return <div>Department permissions for KB {kbId}</div>
-}
-
-// Define the extension tab
-const departmentExtensionTab: ExtensionTabConfig = {
+const departmentTab: ExtensionTabConfig = {
   id: 'department',
   label: 'Department',
   icon: Building2,
@@ -56,124 +255,122 @@ const departmentExtensionTab: ExtensionTabConfig = {
   requiresManagePermission: true,
 }
 
-// Extended knowledge detail panel
-interface ExtendedKnowledgeDetailPanelProps {
-  selectedKb: KnowledgeBase | null
-  // ... other props
-}
+// In your component:
+<KbPermissionsPanel
+  kbId={kbId}
+  canManagePermissions={canManagePermissions}
+  extensionTabs={[departmentTab]}
+/>
+```
 
-export function ExtendedKnowledgeDetailPanel(props: ExtendedKnowledgeDetailPanelProps) {
-  return (
-    <KnowledgeDetailPanel
-      {...props}
-      permissionExtensionTabs={[departmentExtensionTab]}
-    />
-  )
+The `KnowledgeDetailPanel` component also exposes this via the `permissionExtensionTabs` prop:
+
+```typescript
+<KnowledgeDetailPanel
+  selectedKb={selectedKb}
+  permissionExtensionTabs={[departmentTab]}
+/>
+```
+
+## Create KB Dialog Extension
+
+The create KB dialog (`CreateKnowledgeBaseDialog`) provides two extension mechanisms: form section injection and post-creation hooks.
+
+### Form Sections
+
+The `KnowledgeBaseForm` component defines well-defined slot positions for external packages to inject custom UI sections:
+
+```typescript
+export interface KnowledgeBaseFormSections {
+  /** Rendered after the description field, before summary settings */
+  afterDescription?: React.ReactNode
+
+  /** Rendered at the very end of the form, after advanced settings */
+  afterAdvanced?: React.ReactNode
 }
 ```
 
-## Implementation Guide
+### Registering Form Sections
 
-### Step 1: Create Your Permission Component
-
-Create a component that implements your custom permission logic:
+External packages register form sections during app initialization:
 
 ```typescript
-// features/knowledge/extensions/DepartmentPermissionTab.tsx
-'use client'
+import { setCreateKbFormSections } from '@/features/knowledge/document/components'
 
-import { useState, useEffect } from 'react'
-import { Card } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
+setCreateKbFormSections({
+  afterDescription: <AuthorizationSection />,
+  afterAdvanced: <CustomFooter />,
+})
+```
 
-interface DepartmentPermissionTabProps {
-  kbId: number
-}
+### Post-Creation Hook
 
-export function DepartmentPermissionTab({ kbId }: DepartmentPermissionTabProps) {
-  const [permissions, setPermissions] = useState([])
-  const [loading, setLoading] = useState(false)
+Register a handler to be called after KB creation (e.g., to set up external bindings):
 
-  useEffect(() => {
-    // Fetch department permissions for this knowledge base
-    fetchDepartmentPermissions(kbId).then(setPermissions)
-  }, [kbId])
+```typescript
+import { setPostCreateHandler } from '@/features/knowledge/document/components'
 
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-lg font-medium">Department Permissions</h3>
-        <Button>Add Department</Button>
-      </div>
-      {/* Render your permission management UI */}
-      {permissions.map(dept => (
-        <Card key={dept.id}>{dept.name}</Card>
-      ))}
-    </div>
-  )
+setPostCreateHandler(async (kbId) => {
+  await myBindingApi.apply(kbId)
+  await initializeExternalPermissions(kbId)
+})
+```
+
+### Read/Write Separation
+
+These extension points follow a **read/write separation** pattern:
+
+| File | Write (External Package) | Read (Open-Source Component) |
+|------|--------------------------|------------------------------|
+| `createKbDialogState.ts` | `setCreateKbFormSections()` | `getCreateKbFormSections()` |
+| `createKbDialogState.ts` | `setPostCreateHandler()` | `runPostCreateHandler()` |
+
+## Role Select Extension
+
+The `AddUserForm` component allows replacing the default role `<Select>` dropdown with a custom component.
+
+### RoleSelectComponent Props
+
+```typescript
+export interface RoleSelectComponentProps {
+  value: MemberRole
+  onChange: (role: MemberRole) => void
 }
 ```
 
-### Step 2: Configure the Extension Tab
-
-Define your extension tab configuration:
+### Registration
 
 ```typescript
-import { Building2 } from 'lucide-react'
-import type { ExtensionTabConfig } from '@/features/knowledge'
-import { DepartmentPermissionTab } from './DepartmentPermissionTab'
+import { setRoleSelectComponent } from '@/features/knowledge/permission/components'
+import { ErpRoleSelect } from './ErpRoleSelect'
 
-export const departmentExtensionTab: ExtensionTabConfig = {
-  id: 'department',
-  label: 'Department',
-  icon: Building2,
-  component: DepartmentPermissionTab,
-  requiresManagePermission: true, // Only show for users with manage permission
-}
+setRoleSelectComponent(ErpRoleSelect)
 ```
 
-### Step 3: Inject into KnowledgeDetailPanel
+When registered, `AddUserForm` renders the custom component instead of the default role dropdown. This is useful for ERP integrations that need to display custom role options alongside standard ones.
 
-Wrap the `KnowledgeDetailPanel` to inject your extension:
+### Clear
+
+Pass `undefined` to clear the registered component:
 
 ```typescript
-// features/knowledge/extensions/ExtendedKnowledgeDetailPanel.tsx
-import { KnowledgeDetailPanel, type ExtensionTabConfig } from '@/features/knowledge'
-import { departmentExtensionTab } from './departmentExtensionTab'
-
-interface ExtendedKnowledgeDetailPanelProps {
-  selectedKb: KnowledgeBase | null
-  // ... other props from KnowledgeDetailPanelProps
-}
-
-export function ExtendedKnowledgeDetailPanel(props: ExtendedKnowledgeDetailPanelProps) {
-  return (
-    <KnowledgeDetailPanel
-      {...props}
-      permissionExtensionTabs={[departmentExtensionTab]}
-    />
-  )
-}
+setRoleSelectComponent(undefined)
 ```
 
 ## Backend Integration
 
-Your custom permission tab should integrate with the backend through the `IKbPermissionResolver` interface. See the [backend documentation](../../concepts/permission-system.md) for details.
+### Python Entry Points for Permission Resolvers
 
-### API Endpoints
+The backend uses Python entry points to dynamically load permission resolver implementations:
 
-You should create the following API endpoints for your custom permission system:
+```toml
+[project.entry-points."wegent.kb_permissions"]
+department = "app.extensions.myext.kb_permissions:DepartmentPermissionResolver"
+```
 
-- `GET /api/knowledge-bases/{kb_id}/department-permissions` - List department permissions
-- `POST /api/knowledge-bases/{kb_id}/department-permissions` - Add department permission
-- `DELETE /api/knowledge-bases/{kb_id}/department-permissions/{id}` - Remove department permission
-
-### Backend Extension
-
-Implement the `IKbPermissionResolver` interface in your backend:
+Implement the resolver interface:
 
 ```python
-# backend/app/extensions/myext/kb_permissions.py
 from app.services.readers.kb_permissions import IKbPermissionResolver
 
 class DepartmentPermissionResolver(IKbPermissionResolver):
@@ -181,122 +378,48 @@ class DepartmentPermissionResolver(IKbPermissionResolver):
         self._base = base
 
     def resolve(self, db, kb_id, user_id, kb):
-        # Check if user has access via department
         if self._has_department_access(db, kb_id, user_id):
             return "Developer"
         return self._base.resolve(db, kb_id, user_id, kb)
 
     def get_accessible_kb_ids(self, db, user_id):
-        # Return KB IDs accessible via department
         dept_ids = self._get_dept_accessible_kbs(db, user_id)
         base_ids = self._base.get_accessible_kb_ids(db, user_id)
         return list(set(dept_ids + base_ids))
 ```
 
-Register the extension via Python entry points in your `pyproject.toml`:
-
-```toml
-[project.entry-points."wegent.kb_permissions"]
-department = "app.extensions.myext.kb_permissions:DepartmentPermissionResolver"
-```
-
-## Examples
-
-### ERP Department Permissions
-
-```typescript
-import { Building2 } from 'lucide-react'
-import { useTranslation } from '@/hooks/useTranslation'
-import { useErpDepartments } from './hooks/useErpDepartments'
-
-function ErpDeptTab({ kbId }: { kbId: number }) {
-  const { t } = useTranslation('knowledge')
-  const { departments, loading, addDepartment, removeDepartment } = useErpDepartments(kbId)
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-lg font-medium">{t('document.permission.erpDepartments')}</h3>
-        <AddDepartmentDialog kbId={kbId} onAdd={addDepartment} />
-      </div>
-      {/* List of authorized departments */}
-    </div>
-  )
-}
-
-export const erpExtensionTab: ExtensionTabConfig = {
-  id: 'department',
-  label: 'Department',
-  icon: Building2,
-  component: ErpDeptTab,
-  requiresManagePermission: true,
-}
-```
-
-### Multiple Extension Tabs
-
-You can add multiple extension tabs:
-
-```typescript
-const extensionTabs: ExtensionTabConfig[] = [
-  {
-    id: 'department',
-    label: 'Department',
-    icon: Building2,
-    component: DepartmentTab,
-    requiresManagePermission: true,
-  },
-  {
-    id: 'employee',
-    label: 'Employee',
-    icon: Users,
-    component: EmployeeTab,
-    requiresManagePermission: true,
-  },
-]
-
-<KnowledgeDetailPanel
-  selectedKb={selectedKb}
-  permissionExtensionTabs={extensionTabs}
-/>
-```
-
 ## Best Practices
 
-1. **Unique IDs**: Ensure your extension tab IDs are unique to avoid conflicts.
+1. **Initialize Early**: Call `registerComponents()`, `setExternalBindingApi()`, and other registration functions during application initialization (before any components are rendered).
 
-2. **Permission Checks**: Use `requiresManagePermission` appropriately to hide tabs from users without management rights.
+2. **Lazy Component Resolution**: Use `useMemo(() => getComponent(name, Default), [])` at render time, not module-level `getComponent()` calls. This ensures registered components are available even with non-deterministic module import ordering.
 
-3. **Lazy Loading**: For heavy components, use dynamic imports:
+3. **Unique IDs**: Ensure extension tab IDs and provider names are unique to avoid conflicts.
 
-   ```typescript
-   const DepartmentTab = lazy(() => import('./DepartmentTab'))
-   ```
+4. **Permission Checks**: Use `requiresManagePermission` appropriately to hide extension tabs from users without management rights.
 
-4. **Error Boundaries**: Wrap your extension components with error boundaries to prevent crashes from affecting the entire panel.
+5. **Error Boundaries**: Wrap extension components with error boundaries to prevent crashes from affecting the entire panel.
 
-5. **Consistent Styling**: Use the project's design system components (Card, Button, etc.) for consistent UI.
+6. **Error Handling**: Always check `hasExternalBindingApi()` before accessing the binding API, or use `getExternalBindingApi(true)` to throw a descriptive error.
 
-6. **i18n Support**: Use the `useTranslation` hook for all user-facing text.
+7. **Consistent Styling**: Use the project's design system components for consistent UI.
 
-## Troubleshooting
+8. **i18n Support**: Use the `useTranslation` hook for all user-facing text in extension components.
 
-### Extension Tab Not Showing
+## Extension Points Summary
 
-- Check that the tab ID is unique
-- Verify `requiresManagePermission` logic if applicable
-- Ensure the component is properly exported and imported
-
-### Permission Not Applied
-
-- Verify the backend `IKbPermissionResolver` implementation
-- Check that the entry point is correctly registered in `pyproject.toml`
-- Review backend logs for extension loading errors
-
-### Type Errors
-
-- Ensure `ExtensionTabConfig` is imported from the correct location
-- Verify the component prop types match `{ kbId: number }`
+| File | Export | Type | Description |
+|------|--------|------|-------------|
+| `registry.ts` | `registerComponents()` | Override | Replace DocumentPanel or KnowledgeDetailPanel entirely |
+| `knowledgeExtensions.ts` | `setExternalBindingApi()` | Provider + Bridge | Set external binding API with searchable providers |
+| `knowledgeExtensions.ts` | `bindingProviderRegistry` | Registry | Register/unregister binding providers |
+| `knowledgeExtensions.ts` | `hasExternalBindingApi()` | Check | Check if binding API is available |
+| `knowledgeExtensions.ts` | `getExternalBindingApi()` | Access | Get the binding API instance |
+| `permission/components/KbPermissionsPanel.tsx` | `extensionTabs` prop | Prop Injection | Add custom permission management tabs |
+| `document/components/createKbDialogState.ts` | `setCreateKbFormSections()` | State Bridge | Inject form sections into create KB dialog |
+| `document/components/createKbDialogState.ts` | `setPostCreateHandler()` | State Bridge | Register post-creation hook |
+| `permission/components/add-user-form-state.ts` | `setRoleSelectComponent()` | Component Bridge | Replace role select in AddUserForm |
+| `document/components/index.ts` | Exports all above | N/A | Single import entry for all extension APIs |
 
 ## See Also
 
