@@ -35,3 +35,11 @@ export {
   clearRegistry,
 } from './registry'
 export type { ComponentRegistry } from './registry'
+
+// Create KB dialog state for extension support
+export {
+  setCreateKbFormSections,
+  getCreateKbFormSections,
+  setPostCreateHandler,
+  runPostCreateHandler,
+} from './createKbDialogState'
