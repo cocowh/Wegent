@@ -363,6 +363,7 @@
       }
     },
     "permission": {
+      "personal": "Personal",
       "noAccess": "You do not have permission to perform this action",
       "share": "Share",
       "shareLink": "Invite to Collaborate",
