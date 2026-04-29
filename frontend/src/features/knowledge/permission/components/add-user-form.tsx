@@ -17,6 +17,7 @@ import { useTranslation } from '@/hooks/useTranslation'
 import { UserSearchSelect } from '@/components/common/UserSearchSelect'
 import type { MemberRole } from '@/types/knowledge'
 import type { SearchUser } from '@/types/api'
+import { getRoleSelectComponent } from './add-user-form-state'
 
 interface AddUserFormProps {
   selectedUsers: SearchUser[]
@@ -36,6 +37,7 @@ export function AddUserForm({
   error,
 }: AddUserFormProps) {
   const { t } = useTranslation('knowledge')
+  const RoleSelectComponent = getRoleSelectComponent()
 
   return (
     <form onSubmit={onSubmit}>
@@ -51,50 +53,54 @@ export function AddUserForm({
           />
         </div>
 
-        {/* Role Select */}
+        {/* Role Select — use custom component if registered, otherwise default dropdown */}
         <div className="space-y-2">
           <Label htmlFor="role">{t('document.permission.role.label')}</Label>
-          <Select value={role} onValueChange={v => onRoleChange(v as MemberRole)}>
-            <SelectTrigger id="role">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="Maintainer">
-                <div>
-                  <div className="font-medium">{t('document.permission.role.Maintainer')}</div>
-                  <div className="text-xs text-text-muted">
-                    {t('document.permission.role.MaintainerDescription')}
+          {RoleSelectComponent ? (
+            <RoleSelectComponent value={role} onChange={onRoleChange} />
+          ) : (
+            <Select value={role} onValueChange={v => onRoleChange(v as MemberRole)}>
+              <SelectTrigger id="role">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Maintainer">
+                  <div>
+                    <div className="font-medium">{t('document.permission.role.Maintainer')}</div>
+                    <div className="text-xs text-text-muted">
+                      {t('document.permission.role.MaintainerDescription')}
+                    </div>
                   </div>
-                </div>
-              </SelectItem>
-              <SelectItem value="Developer">
-                <div>
-                  <div className="font-medium">{t('document.permission.role.Developer')}</div>
-                  <div className="text-xs text-text-muted">
-                    {t('document.permission.role.DeveloperDescription')}
+                </SelectItem>
+                <SelectItem value="Developer">
+                  <div>
+                    <div className="font-medium">{t('document.permission.role.Developer')}</div>
+                    <div className="text-xs text-text-muted">
+                      {t('document.permission.role.DeveloperDescription')}
+                    </div>
                   </div>
-                </div>
-              </SelectItem>
-              <SelectItem value="Reporter">
-                <div>
-                  <div className="font-medium">{t('document.permission.role.Reporter')}</div>
-                  <div className="text-xs text-text-muted">
-                    {t('document.permission.role.ReporterDescription')}
+                </SelectItem>
+                <SelectItem value="Reporter">
+                  <div>
+                    <div className="font-medium">{t('document.permission.role.Reporter')}</div>
+                    <div className="text-xs text-text-muted">
+                      {t('document.permission.role.ReporterDescription')}
+                    </div>
                   </div>
-                </div>
-              </SelectItem>
-              <SelectItem value="RestrictedAnalyst">
-                <div>
-                  <div className="font-medium">
-                    {t('document.permission.role.RestrictedAnalyst')}
+                </SelectItem>
+                <SelectItem value="RestrictedAnalyst">
+                  <div>
+                    <div className="font-medium">
+                      {t('document.permission.role.RestrictedAnalyst')}
+                    </div>
+                    <div className="text-xs text-text-muted">
+                      {t('document.permission.role.RestrictedAnalystDescription')}
+                    </div>
                   </div>
-                  <div className="text-xs text-text-muted">
-                    {t('document.permission.role.RestrictedAnalystDescription')}
-                  </div>
-                </div>
-              </SelectItem>
-            </SelectContent>
-          </Select>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          )}
         </div>
 
         {/* Error Message */}

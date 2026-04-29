@@ -24,6 +24,7 @@ import { canManageNamespace } from '@/utils/namespace-permissions'
 import { useKnowledgeTree } from '../hooks/useKnowledgeTree'
 import { KnowledgeTree } from './KnowledgeTree'
 import { CreateKnowledgeBaseDialog } from './CreateKnowledgeBaseDialog'
+import { getCreateKbFormSections, runPostCreateHandler } from './createKbDialogState'
 import type {
   KnowledgeBase,
   KnowledgeBaseCreate,
@@ -170,7 +171,7 @@ export function KnowledgeDocumentPageMobile({
         const kbType = data.kb_type || createKbType
 
         const { createKnowledgeBase } = await import('@/apis/knowledge')
-        await createKnowledgeBase({
+        const createdKb = await createKnowledgeBase({
           name: data.name,
           description: data.description,
           namespace,
@@ -182,6 +183,9 @@ export function KnowledgeDocumentPageMobile({
           max_calls_per_conversation: data.max_calls_per_conversation,
           exempt_calls_before_check: data.exempt_calls_before_check,
         })
+
+        // Invoke registered post-create handler (e.g., external binding setup)
+        await runPostCreateHandler(createdKb.id)
 
         // Save model preference when summary is enabled and model is selected
         if (data.summary_enabled && data.summary_model_ref) {
@@ -257,6 +261,7 @@ export function KnowledgeDocumentPageMobile({
         kbType={createKbType}
         knowledgeDefaultTeamId={knowledgeDefaultTeamId}
         bindModel={knowledgeBindModel}
+        formSections={getCreateKbFormSections()}
       />
     </div>
   )
