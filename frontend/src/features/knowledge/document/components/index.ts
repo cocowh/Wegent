@@ -25,3 +25,12 @@ export { KnowledgeBaseSummaryCard } from './KnowledgeBaseSummaryCard'
 export { GuidedQuestions } from './GuidedQuestions'
 export { DocumentPanel } from './DocumentPanel'
 export { ChunksSection } from './ChunksSection'
+
+// Component registry for extension support
+export {
+  registerComponents,
+  getComponent,
+  hasComponent,
+  clearRegistry,
+} from './registry'
+export type { ComponentRegistry } from './registry'

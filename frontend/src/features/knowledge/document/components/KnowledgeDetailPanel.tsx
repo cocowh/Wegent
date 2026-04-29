@@ -35,7 +35,7 @@ import {
 import type { KnowledgeBase } from '@/types/knowledge'
 import type { Team } from '@/types/api'
 
-interface KnowledgeDetailPanelProps {
+export interface KnowledgeDetailPanelProps {
   /** Currently selected knowledge base */
   selectedKb: KnowledgeBase | null
   /** Whether the tree panel is collapsed */

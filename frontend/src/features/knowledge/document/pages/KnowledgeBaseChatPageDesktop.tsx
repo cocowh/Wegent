@@ -29,9 +29,16 @@ import { useTeamContext } from '@/contexts/TeamContext'
 import { useKnowledgeBaseDetail } from '@/features/knowledge/document/hooks'
 import { useNamespaceRoleMap } from '@/features/knowledge/document/hooks/useNamespaceRoleMap'
 import { useKnowledgePermissions } from '@/features/knowledge/permission/hooks/useKnowledgePermissions'
-import { DocumentPanel, KnowledgeBaseSummaryCard } from '@/features/knowledge/document/components'
+import {
+  DocumentPanel as DefaultDocumentPanel,
+  KnowledgeBaseSummaryCard,
+  getComponent,
+} from '@/features/knowledge/document/components'
 import { BoundKnowledgeBaseSummary } from '@/features/tasks/components/group-chat'
 import { taskKnowledgeBaseApi } from '@/apis/task-knowledge-base'
+
+// Use registered component if available, otherwise use default
+const DocumentPanel = getComponent('DocumentPanel', DefaultDocumentPanel)
 import {
   canManageKnowledgeBase,
   canManageKnowledgeBaseDocuments,

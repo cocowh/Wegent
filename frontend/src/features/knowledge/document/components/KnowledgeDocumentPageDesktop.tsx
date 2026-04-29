@@ -25,8 +25,12 @@ import { listKnowledgeBases } from '@/apis/knowledge'
 import { useKnowledgeSidebar, type KnowledgeGroup } from '../hooks/useKnowledgeSidebar'
 import { useNamespaceRoleMap } from '../hooks/useNamespaceRoleMap'
 import { KnowledgeSidebar } from './KnowledgeSidebar'
-import { KnowledgeDetailPanel } from './KnowledgeDetailPanel'
+import { KnowledgeDetailPanel as DefaultKnowledgeDetailPanel } from './KnowledgeDetailPanel'
+import { getComponent } from './registry'
 import { KnowledgeGroupListPage, type KbDataItem } from './KnowledgeGroupListPage'
+
+// Use registered component if available, otherwise use default
+const KnowledgeDetailPanel = getComponent('KnowledgeDetailPanel', DefaultKnowledgeDetailPanel)
 import { CreateKnowledgeBaseDialog, type AvailableGroup } from './CreateKnowledgeBaseDialog'
 import { EditKnowledgeBaseDialog } from './EditKnowledgeBaseDialog'
 import { DeleteKnowledgeBaseDialog } from './DeleteKnowledgeBaseDialog'
