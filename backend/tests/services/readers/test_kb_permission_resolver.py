@@ -138,11 +138,16 @@ def test_load_from_entry_points_skips_invalid_interface(
     with patch("importlib.metadata.entry_points", return_value=[mock_ep]):
         import logging
 
-        with caplog.at_level(logging.ERROR, logger="app.services.readers.kb_permissions"):
+        with caplog.at_level(
+            logging.ERROR, logger="app.services.readers.kb_permissions"
+        ):
             result = _load_from_entry_points(base)
 
     assert result is None
-    assert any("does not implement IKbPermissionResolver" in rec.message for rec in caplog.records)
+    assert any(
+        "does not implement IKbPermissionResolver" in rec.message
+        for rec in caplog.records
+    )
 
 
 @pytest.mark.unit
@@ -157,7 +162,9 @@ def test_load_from_entry_points_handles_exception(
     with patch("importlib.metadata.entry_points", return_value=[mock_ep]):
         import logging
 
-        with caplog.at_level(logging.WARNING, logger="app.services.readers.kb_permissions"):
+        with caplog.at_level(
+            logging.WARNING, logger="app.services.readers.kb_permissions"
+        ):
             result = _load_from_entry_points(base)
 
     assert result is None

@@ -130,7 +130,9 @@ class DefaultKbPermissionResolver(IKbPermissionResolver):
 # =============================================================================
 
 
-def _load_from_entry_points(base: IKbPermissionResolver) -> Optional[IKbPermissionResolver]:
+def _load_from_entry_points(
+    base: IKbPermissionResolver,
+) -> Optional[IKbPermissionResolver]:
     """
     Load resolver from entry points.
 
