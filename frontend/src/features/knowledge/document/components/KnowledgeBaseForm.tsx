@@ -23,8 +23,43 @@ import type { KnowledgeResourceScope, RetrievalConfig, SummaryModelRef } from '@
 import { RetrievalSettingsSection } from './RetrievalSettingsSection'
 import { SummaryModelSelector } from './SummaryModelSelector'
 
+/**
+ * Well-defined slot positions within KnowledgeBaseForm for external
+ * packages to inject custom UI sections.
+ *
+ * Each property is a render slot at a specific location in the form layout.
+ * Multiple slots in the same position are supported via array concatenation.
+ *
+ * @example
+ * ```typescript
+ * <KnowledgeBaseForm
+ *   extraSections={{
+ *     afterDescription: <AuthorizationSection />,
+ *     afterAdvanced: <CustomFooter />,
+ *   }}
+ *   // ... other props
+ * />
+ * ```
+ */
+export interface KnowledgeBaseFormSections {
+  /**
+   * Rendered after the description field, before the summary settings section.
+   * Use this for authorization, permissions, or additional configuration that
+   * logically belongs between basic info and AI summary settings.
+   */
+  afterDescription?: React.ReactNode
+
+  /**
+   * Rendered at the very end of the form, after the advanced settings section.
+   * Use this for footers, disclaimers, or extra action buttons.
+   */
+  afterAdvanced?: React.ReactNode
+}
+
 interface KnowledgeBaseFormProps {
   typeSection?: ReactNode
+  /** Extra UI sections injected at well-defined form slot positions */
+  extraSections?: KnowledgeBaseFormSections
   name: string
   description: string
   onNameChange: (value: string) => void
@@ -63,6 +98,7 @@ interface KnowledgeBaseFormProps {
 
 export function KnowledgeBaseForm({
   typeSection,
+  extraSections,
   name,
   description,
   onNameChange,
@@ -223,6 +259,8 @@ export function KnowledgeBaseForm({
         />
       </div>
 
+      {extraSections?.afterDescription}
+
       <div className="space-y-3 border-b border-border pb-4">
         <div className="flex items-center justify-between">
           <div className="space-y-0.5">
@@ -344,6 +382,8 @@ export function KnowledgeBaseForm({
           )}
         </div>
       )}
+
+      {extraSections?.afterAdvanced}
     </div>
   )
 }
