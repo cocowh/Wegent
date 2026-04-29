@@ -7,12 +7,13 @@ Unit tests for the KB permission resolver extension point.
 
 Covers:
 - DefaultKbPermissionResolver no-op behaviour
-- _create_resolver returns default when SERVICE_EXTENSION is unset
-- _create_resolver wraps with extension when SERVICE_EXTENSION is set
+- _create_resolver returns default when no entry point is registered
+- _create_resolver loads from entry points when available
+- _load_from_entry_points validates interface implementation
 - _LazyReader initialises lazily and delegates via __getattr__
-- ImportError produces a warning log and falls back to the default resolver
-- General exception produces a warning log and falls back to the default resolver
-- get_user_kb_permission calls the resolver as the final fallback
+- Invalid entry point produces a warning log and falls back to default
+- Exception during entry point load falls back to default
+- get_user_kb_permission calls resolver as the final fallback
 """
 
 import importlib
@@ -29,15 +30,17 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.services.readers.kb_permissions import (
+    ENTRY_POINT_GROUP,
     DefaultKbPermissionResolver,
     IKbPermissionResolver,
     _create_resolver,
     _LazyReader,
+    _load_from_entry_points,
 )
 
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 
 
 def _make_db() -> Session:
@@ -50,9 +53,17 @@ def _make_kb(kb_id: int = 1) -> MagicMock:
     return kb
 
 
-# ---------------------------------------------------------------------------
+def _make_entry_point(name: str, target_class):
+    """Create a mock entry point."""
+    ep = MagicMock()
+    ep.name = name
+    ep.load.return_value = target_class
+    return ep
+
+
+# -----------------------------------------------------------------------------
 # DefaultKbPermissionResolver
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 
 
 @pytest.mark.unit
@@ -71,117 +82,177 @@ def test_default_resolver_get_accessible_kb_ids_returns_empty_list() -> None:
     assert result == []
 
 
-# ---------------------------------------------------------------------------
-# _create_resolver — no extension configured
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# _load_from_entry_points
+# -----------------------------------------------------------------------------
 
 
 @pytest.mark.unit
-def test_create_resolver_returns_default_when_no_extension(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """When SERVICE_EXTENSION is empty, _create_resolver returns DefaultKbPermissionResolver."""
-    from app.core.config import settings
+def test_load_from_entry_points_returns_none_when_no_entry_points() -> None:
+    """When no entry points are registered, return None."""
+    base = DefaultKbPermissionResolver()
 
-    monkeypatch.setattr(settings, "SERVICE_EXTENSION", "")
-    result = _create_resolver()
-    assert isinstance(result, DefaultKbPermissionResolver)
+    with patch("importlib.metadata.entry_points", return_value=[]):
+        result = _load_from_entry_points(base)
 
-
-# ---------------------------------------------------------------------------
-# _create_resolver — extension loaded via wrap(base)
-# ---------------------------------------------------------------------------
+    assert result is None
 
 
 @pytest.mark.unit
-def test_create_resolver_wraps_with_extension(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """When SERVICE_EXTENSION is set and wrap() succeeds, the wrapped resolver is used."""
+def test_load_from_entry_points_loads_valid_resolver() -> None:
+    """When a valid entry point is registered, load and instantiate it."""
 
     class _CustomResolver(IKbPermissionResolver):
+        def __init__(self, base: IKbPermissionResolver):
+            self._base = base
+
         def resolve(self, db, kb_id, user_id, kb) -> Optional[str]:
             return "Reporter"
 
         def get_accessible_kb_ids(self, db, user_id) -> list[int]:
             return [10, 20]
 
-    def _fake_wrap(base: IKbPermissionResolver) -> IKbPermissionResolver:
-        return _CustomResolver()
+    base = DefaultKbPermissionResolver()
+    mock_ep = _make_entry_point("custom", _CustomResolver)
 
-    fake_ext = ModuleType("myext.kb_permissions")
-    fake_ext.wrap = _fake_wrap  # type: ignore[attr-defined]
-
-    with patch("app.core.config.settings") as mock_settings:
-        mock_settings.SERVICE_EXTENSION = "myext"
-        with patch("importlib.import_module", return_value=fake_ext):
-            from app.services.readers import kb_permissions
-
-            result = kb_permissions._create_resolver()
+    with patch("importlib.metadata.entry_points", return_value=[mock_ep]):
+        result = _load_from_entry_points(base)
 
     assert isinstance(result, _CustomResolver)
     assert result.resolve(_make_db(), kb_id=1, user_id=1, kb=_make_kb()) == "Reporter"
     assert result.get_accessible_kb_ids(_make_db(), user_id=1) == [10, 20]
 
 
-# ---------------------------------------------------------------------------
-# _create_resolver — ImportError falls back to default with warning
-# ---------------------------------------------------------------------------
+@pytest.mark.unit
+def test_load_from_entry_points_skips_invalid_interface(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """When entry point class does not implement IKbPermissionResolver, log error and return None."""
+
+    class _NotAResolver:
+        pass
+
+    base = DefaultKbPermissionResolver()
+    mock_ep = _make_entry_point("invalid", _NotAResolver)
+
+    with patch("importlib.metadata.entry_points", return_value=[mock_ep]):
+        import logging
+
+        with caplog.at_level(logging.ERROR, logger="app.services.readers.kb_permissions"):
+            result = _load_from_entry_points(base)
+
+    assert result is None
+    assert any("does not implement IKbPermissionResolver" in rec.message for rec in caplog.records)
 
 
 @pytest.mark.unit
-def test_create_resolver_falls_back_on_import_error(
+def test_load_from_entry_points_handles_exception(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """ImportError during extension load logs a warning and returns the default resolver."""
-    with patch("app.core.config.settings") as mock_settings:
-        mock_settings.SERVICE_EXTENSION = "missing_ext"
-        with patch("importlib.import_module", side_effect=ImportError("no module")):
-            import logging
+    """When entry point load raises exception, log warning and return None."""
+    base = DefaultKbPermissionResolver()
+    mock_ep = _make_entry_point("broken", None)
+    mock_ep.load.side_effect = RuntimeError("load failed")
 
-            with caplog.at_level(
-                logging.WARNING, logger="app.services.readers.kb_permissions"
-            ):
-                from app.services.readers import kb_permissions
+    with patch("importlib.metadata.entry_points", return_value=[mock_ep]):
+        import logging
 
-                result = kb_permissions._create_resolver()
+        with caplog.at_level(logging.WARNING, logger="app.services.readers.kb_permissions"):
+            result = _load_from_entry_points(base)
 
-    assert isinstance(result, DefaultKbPermissionResolver)
-    assert any("not found" in rec.message for rec in caplog.records)
-
-
-# ---------------------------------------------------------------------------
-# _create_resolver — generic exception falls back to default with warning
-# ---------------------------------------------------------------------------
+    assert result is None
+    assert any("Failed to load entry point" in rec.message for rec in caplog.records)
 
 
 @pytest.mark.unit
-def test_create_resolver_falls_back_on_general_exception(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """A non-ImportError exception during extension load logs a warning and returns default."""
-    fake_ext = ModuleType("myext.kb_permissions")
-    fake_ext.wrap = MagicMock(side_effect=RuntimeError("boom"))  # type: ignore[attr-defined]
+def test_load_from_entry_points_uses_first_entry_point() -> None:
+    """When multiple entry points are registered, use the first one."""
 
-    with patch("app.core.config.settings") as mock_settings:
-        mock_settings.SERVICE_EXTENSION = "myext"
-        with patch("importlib.import_module", return_value=fake_ext):
-            import logging
+    class _FirstResolver(IKbPermissionResolver):
+        def __init__(self, base: IKbPermissionResolver):
+            self._base = base
 
-            with caplog.at_level(
-                logging.WARNING, logger="app.services.readers.kb_permissions"
-            ):
-                from app.services.readers import kb_permissions
+        def resolve(self, db, kb_id, user_id, kb) -> Optional[str]:
+            return "First"
 
-                result = kb_permissions._create_resolver()
+        def get_accessible_kb_ids(self, db, user_id) -> list[int]:
+            return [1]
+
+    class _SecondResolver(IKbPermissionResolver):
+        def __init__(self, base: IKbPermissionResolver):
+            self._base = base
+
+        def resolve(self, db, kb_id, user_id, kb) -> Optional[str]:
+            return "Second"
+
+        def get_accessible_kb_ids(self, db, user_id) -> list[int]:
+            return [2]
+
+    base = DefaultKbPermissionResolver()
+    mock_ep1 = _make_entry_point("first", _FirstResolver)
+    mock_ep2 = _make_entry_point("second", _SecondResolver)
+
+    with patch("importlib.metadata.entry_points", return_value=[mock_ep1, mock_ep2]):
+        result = _load_from_entry_points(base)
+
+    assert isinstance(result, _FirstResolver)
+    assert result.resolve(_make_db(), kb_id=1, user_id=1, kb=_make_kb()) == "First"
+
+
+# -----------------------------------------------------------------------------
+# _create_resolver
+# -----------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_create_resolver_returns_default_when_no_entry_points() -> None:
+    """When no entry points are registered, _create_resolver returns DefaultKbPermissionResolver."""
+    with patch("importlib.metadata.entry_points", return_value=[]):
+        result = _create_resolver()
 
     assert isinstance(result, DefaultKbPermissionResolver)
-    assert any("Failed to load" in rec.message for rec in caplog.records)
 
 
-# ---------------------------------------------------------------------------
+@pytest.mark.unit
+def test_create_resolver_loads_from_entry_points() -> None:
+    """When entry point is registered, _create_resolver loads it."""
+
+    class _CustomResolver(IKbPermissionResolver):
+        def __init__(self, base: IKbPermissionResolver):
+            self._base = base
+
+        def resolve(self, db, kb_id, user_id, kb) -> Optional[str]:
+            return "Maintainer"
+
+        def get_accessible_kb_ids(self, db, user_id) -> list[int]:
+            return [100, 200]
+
+    mock_ep = _make_entry_point("custom", _CustomResolver)
+
+    with patch("importlib.metadata.entry_points", return_value=[mock_ep]):
+        result = _create_resolver()
+
+    assert isinstance(result, _CustomResolver)
+
+
+@pytest.mark.unit
+def test_create_resolver_falls_back_to_default_on_invalid_entry_point() -> None:
+    """When entry point is invalid, fall back to DefaultKbPermissionResolver."""
+
+    class _NotAResolver:
+        pass
+
+    mock_ep = _make_entry_point("invalid", _NotAResolver)
+
+    with patch("importlib.metadata.entry_points", return_value=[mock_ep]):
+        result = _create_resolver()
+
+    assert isinstance(result, DefaultKbPermissionResolver)
+
+
+# -----------------------------------------------------------------------------
 # _LazyReader — lazy initialisation and __getattr__ delegation
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 
 
 @pytest.mark.unit
@@ -221,9 +292,9 @@ def test_lazy_reader_delegates_resolve_via_getattr() -> None:
     mock_resolver.resolve.assert_called_once()
 
 
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 # Integration: get_user_kb_permission calls resolver as final fallback
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 
 
 @pytest.mark.unit
