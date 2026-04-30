@@ -95,12 +95,6 @@ export function KbPermissionsPanel({
 
   const [activeTab, setActiveTab] = useState(visibleTabs[0]?.id || 'personal')
 
-  // Get the currently active tab component
-  const ActiveComponent = useMemo(() => {
-    const tab = visibleTabs.find(t => t.id === activeTab)
-    return tab?.component || PermissionManagementTab
-  }, [visibleTabs, activeTab])
-
   // Single tab mode: no tabs UI, just render the content
   if (visibleTabs.length === 1) {
     const TabComponent = visibleTabs[0].component
