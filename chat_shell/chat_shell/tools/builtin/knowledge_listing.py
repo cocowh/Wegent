@@ -284,9 +284,12 @@ class KbLsTool(BaseTool):
 
         try:
             add_span_event("http_request_started")
+            from chat_shell.core.config import settings
+
             headers = {}
-            if self.auth_token:
-                headers["Authorization"] = f"Bearer {self.auth_token}"
+            auth_token = getattr(settings, "INTERNAL_SERVICE_TOKEN", "") or self.auth_token
+            if auth_token:
+                headers["Authorization"] = f"Bearer {auth_token}"
 
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(
@@ -542,9 +545,12 @@ class KbHeadTool(BaseTool):
             }
 
         add_span_event("http_request_started")
+        from chat_shell.core.config import settings
+
         headers = {}
-        if self.auth_token:
-            headers["Authorization"] = f"Bearer {self.auth_token}"
+        auth_token = getattr(settings, "INTERNAL_SERVICE_TOKEN", "") or self.auth_token
+        if auth_token:
+            headers["Authorization"] = f"Bearer {auth_token}"
 
         async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.post(

@@ -716,8 +716,9 @@ class KnowledgeBaseTool(BaseTool):
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 headers = {}
-                if self.auth_token:
-                    headers["Authorization"] = f"Bearer {self.auth_token}"
+                auth_token = getattr(settings, "INTERNAL_SERVICE_TOKEN", "") or self.auth_token
+                if auth_token:
+                    headers["Authorization"] = f"Bearer {auth_token}"
 
                 response = await client.post(
                     f"{backend_url}/api/internal/rag/kb-size",
@@ -996,8 +997,9 @@ class KnowledgeBaseTool(BaseTool):
             payload["user_name"] = self.user_name
 
         headers = {}
-        if self.auth_token:
-            headers["Authorization"] = f"Bearer {self.auth_token}"
+        auth_token = getattr(settings, "INTERNAL_SERVICE_TOKEN", "") or self.auth_token
+        if auth_token:
+            headers["Authorization"] = f"Bearer {auth_token}"
 
         async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.post(

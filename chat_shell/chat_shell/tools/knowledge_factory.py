@@ -254,8 +254,10 @@ async def _check_any_kb_has_rag_enabled(
 
         add_span_event("querying_backend_api")
         headers = {}
-        if auth_token:
-            headers["Authorization"] = f"Bearer {auth_token}"
+        # Priority: INTERNAL_SERVICE_TOKEN (service-to-service) > auth_token (task token)
+        token = getattr(settings, "INTERNAL_SERVICE_TOKEN", "") or auth_token
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
             set_span_attribute("auth_token_provided", True)
         else:
             set_span_attribute("auth_token_provided", False)
