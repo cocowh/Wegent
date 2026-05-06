@@ -715,9 +715,14 @@ class KnowledgeBaseTool(BaseTool):
 
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
+                headers = {}
+                if self.auth_token:
+                    headers["Authorization"] = f"Bearer {self.auth_token}"
+
                 response = await client.post(
                     f"{backend_url}/api/internal/rag/kb-size",
                     json={"knowledge_base_ids": self.knowledge_base_ids},
+                    headers=headers,
                 )
 
                 if response.status_code == 200:
