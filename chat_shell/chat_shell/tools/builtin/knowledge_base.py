@@ -995,10 +995,15 @@ class KnowledgeBaseTool(BaseTool):
         if self.user_name is not None:
             payload["user_name"] = self.user_name
 
+        headers = {}
+        if self.auth_token:
+            headers["Authorization"] = f"Bearer {self.auth_token}"
+
         async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.post(
                 f"{backend_url}/api/internal/rag/retrieve",
                 json=payload,
+                headers=headers,
             )
 
             if response.status_code != 200:
