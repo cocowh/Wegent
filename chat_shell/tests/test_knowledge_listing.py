@@ -47,10 +47,13 @@ class TestKbLsTool:
 
             result = await tool._arun(knowledge_base_id=3, offset=2, limit=1)
 
-        post.assert_awaited_once_with(
-            "http://backend/api/internal/rag/list-docs",
-            json={"knowledge_base_id": 3, "offset": 2, "limit": 1},
-        )
+        post.assert_awaited_once()
+        args, kwargs = post.await_args
+        assert args == ("http://backend/api/internal/rag/list-docs",)
+        assert kwargs["json"] == {"knowledge_base_id": 3, "offset": 2, "limit": 1}
+        auth_header = kwargs["headers"]["Authorization"]
+        assert auth_header.startswith("Bearer ")
+        assert auth_header.removeprefix("Bearer ").strip()
 
         data = json.loads(result)
         assert data["total"] == 5
@@ -114,7 +117,9 @@ class TestKbHeadTool:
                 "restricted_mode": False,
             },
         }
-        assert kwargs["headers"]["Authorization"].startswith("Bearer ")
+        auth_header = kwargs["headers"]["Authorization"]
+        assert auth_header.startswith("Bearer ")
+        assert auth_header.removeprefix("Bearer ").strip()
 
         data = json.loads(result)
         assert data["documents"][0]["id"] == 101

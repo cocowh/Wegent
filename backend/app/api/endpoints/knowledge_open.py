@@ -15,7 +15,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_db
-from app.core.exceptions import CustomHTTPException
 from app.core.security import AuthContext, get_auth_context
 from app.schemas.knowledge import (
     DocumentContentReadResponse,
@@ -47,11 +46,8 @@ from shared.telemetry.decorators import add_span_event, trace_async, trace_sync
 router = APIRouter()
 
 
-def _raise_open_knowledge_http_error(exc: Exception) -> None:
+def _raise_open_knowledge_http_error(exc: ValueError) -> None:
     """Map knowledge service errors to open API HTTP responses."""
-    if isinstance(exc, CustomHTTPException):
-        raise exc
-
     error_msg = str(exc)
     lower = error_msg.lower()
     if "not found" in lower:
