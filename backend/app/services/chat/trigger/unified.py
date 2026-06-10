@@ -294,6 +294,7 @@ async def build_execution_request(
     preload_skills: Optional[list] = None,
     previous_bot_id: Optional[int] = None,
     knowledge_base_names: Optional[List[Dict[str, str]]] = None,
+    knowledge_base_refs: Optional[List[Dict[str, Any]]] = None,
     reasoning_config: Optional[Dict[str, Any]] = None,
 ):
     """Build ExecutionRequest without dispatching.
@@ -317,7 +318,8 @@ async def build_execution_request(
         enable_web_search: Whether to enable web search (default: False)
         enable_clarification: Whether to enable clarification mode (default: False)
         preload_skills: Optional list of skills to preload
-        knowledge_base_names: Optional list of KB names in {'namespace': str, 'name': str} format
+        knowledge_base_names: Backward-compatible list of KB names
+        knowledge_base_refs: Optional list of KB refs with optional scope
         reasoning_config: Optional reasoning config dict with 'effort' and 'summary' keys
 
     Returns:
@@ -497,10 +499,11 @@ async def build_execution_request(
             "context" if current_request_id else "generated",
         )
 
-        # Process knowledge base names from API request (OpenAPI v1/responses)
-        # This creates SubtaskContext records for KBs specified in the request
+        # Process knowledge base refs from API request (OpenAPI v1/responses).
+        # This creates SubtaskContext records for KBs specified in the request.
         processed_subtask_id = None
-        if knowledge_base_names:
+        api_kb_refs = knowledge_base_refs or knowledge_base_names or []
+        if api_kb_refs:
             processed_subtask_id = (
                 user_subtask_id if user_subtask_id else assistant_subtask.id
             )
@@ -513,7 +516,7 @@ async def build_execution_request(
                 db,
                 user.id,
                 processed_subtask_id,
-                knowledge_base_names,
+                api_kb_refs,
                 task=task,
                 user_name=user.user_name,
             )
@@ -603,7 +606,8 @@ async def _process_contexts(
         request.knowledge_base_ids = ctx.kb.knowledge_base_ids
         request.is_user_selected_kb = ctx.kb.is_user_selected_kb
         request.kb_tool_access_mode = ctx.kb.kb_tool_access_mode
-        if ctx.kb.document_ids:
+        request.scope_restricted = ctx.kb.scope_restricted
+        if ctx.kb.scope_restricted or ctx.kb.document_ids:
             request.document_ids = ctx.kb.document_ids
         _ensure_selected_kb_skill_priority(request)
 
@@ -623,21 +627,21 @@ async def _create_kb_contexts_from_api_request(
     db: "Session",
     user_id: int,
     user_subtask_id: int,
-    knowledge_base_names: List[Dict[str, str]],
+    knowledge_base_refs: List[Dict[str, Any]],
     task=None,
     user_name: Optional[str] = None,
 ) -> None:
     """Create SubtaskContext records for knowledge bases from API request.
 
     This function creates KB contexts for OpenAPI v1/responses requests
-    that specify knowledge_base_names in the tools field. The created
+    that specify knowledge_base_refs or knowledge_base_names in the tools field. The created
     contexts are then processed by the existing RAG pipeline.
 
     Args:
         db: Database session
         user_id: User ID for permission checking
         user_subtask_id: User subtask ID to attach contexts to
-        knowledge_base_names: List of dicts with 'namespace' and 'name' keys
+        knowledge_base_refs: List of dicts with KB name and optional scope keys
         task: Optional task for syncing selected KBs to task-level refs
         user_name: Optional user name used as boundBy during task-level sync
     """
@@ -647,7 +651,7 @@ async def _create_kb_contexts_from_api_request(
         creator = KnowledgeBaseContextCreator(db, user_id)
         contexts = creator.create_contexts(
             user_subtask_id,
-            knowledge_base_names,
+            knowledge_base_refs,
             task=task,
             user_name=user_name,
         )

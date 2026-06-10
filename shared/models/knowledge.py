@@ -36,6 +36,7 @@ class KnowledgeBaseToolsResult:
     knowledge_base_ids: list[int] = None  # type: ignore[assignment]
     is_user_selected_kb: bool = False
     document_ids: list[int] = None  # type: ignore[assignment]
+    scope_restricted: bool = False
     kb_tool_access_mode: str = KnowledgeBaseToolAccessMode.FULL
 
     def __post_init__(self) -> None:

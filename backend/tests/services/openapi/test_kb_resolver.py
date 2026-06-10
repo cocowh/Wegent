@@ -13,8 +13,10 @@ from fastapi import HTTPException
 
 from app.services.openapi.kb_resolver import (
     KnowledgeBaseNameResolver,
+    KnowledgeBaseRefResolutionResult,
     KnowledgeBaseResolutionResult,
     ResolvedKnowledgeBase,
+    ResolvedKnowledgeBaseRef,
     resolve_knowledge_base_names,
 )
 
@@ -223,6 +225,82 @@ class TestKnowledgeBaseNameResolver:
         assert len(result.resolved) == 0
         assert len(result.not_found) == 0
         assert len(result.no_access) == 0
+
+    def test_resolve_refs_invalid_scope_no_raise_returns_partial_result(
+        self, resolver, mock_db
+    ):
+        """Scoped refs should honor raise_on_error=False."""
+        accessible_kb = self._create_mock_accessible_kb(123, "default", "existing_kb")
+        grouped_response = self._create_mock_grouped_response(
+            created_by_me=[accessible_kb]
+        )
+
+        with patch(
+            "app.services.openapi.kb_resolver.KnowledgeService.get_all_knowledge_bases_grouped"
+        ) as mock_get_grouped:
+            mock_get_grouped.return_value = grouped_response
+            with patch(
+                "app.services.openapi.kb_resolver.KnowledgeFolderService.resolve_document_ids_for_scope"
+            ) as mock_resolve_scope:
+                mock_resolve_scope.side_effect = ValueError(
+                    "Folder 999 not found in this knowledge base"
+                )
+
+                kb_refs = [
+                    {
+                        "namespace": "default",
+                        "name": "existing_kb",
+                        "folder_ids": [999],
+                    },
+                    {
+                        "namespace": "default",
+                        "name": "existing_kb",
+                    },
+                ]
+                result = resolver.resolve_refs(kb_refs, raise_on_error=False)
+
+        assert len(result.resolved) == 1
+        assert result.resolved[0].kb_id == 123
+        assert result.resolved[0].scope_restricted is False
+        assert result.invalid_scope == [
+            {
+                "namespace": "default",
+                "name": "existing_kb",
+                "error": "Folder 999 not found in this knowledge base",
+            }
+        ]
+
+    def test_resolve_refs_invalid_scope_raises_by_default(self, resolver, mock_db):
+        """Scoped refs should keep raising scope errors in strict mode."""
+        accessible_kb = self._create_mock_accessible_kb(123, "default", "existing_kb")
+        grouped_response = self._create_mock_grouped_response(
+            created_by_me=[accessible_kb]
+        )
+
+        with patch(
+            "app.services.openapi.kb_resolver.KnowledgeService.get_all_knowledge_bases_grouped"
+        ) as mock_get_grouped:
+            mock_get_grouped.return_value = grouped_response
+            with patch(
+                "app.services.openapi.kb_resolver.KnowledgeFolderService.resolve_document_ids_for_scope"
+            ) as mock_resolve_scope:
+                mock_resolve_scope.side_effect = ValueError(
+                    "Folder 999 not found in this knowledge base"
+                )
+
+                with pytest.raises(HTTPException) as exc_info:
+                    resolver.resolve_refs(
+                        [
+                            {
+                                "namespace": "default",
+                                "name": "existing_kb",
+                                "folder_ids": [999],
+                            }
+                        ],
+                        raise_on_error=True,
+                    )
+
+        assert exc_info.value.status_code == 404
 
 
 class TestGetAccessibleKbLookup:
@@ -439,3 +517,44 @@ class TestKnowledgeBaseResolutionResult:
         assert len(result.resolved) == 1
         assert len(result.not_found) == 1
         assert len(result.no_access) == 1
+
+
+class TestKnowledgeBaseRefResolutionResult:
+    """Test cases for KnowledgeBaseRefResolutionResult named tuple."""
+
+    def test_named_tuple_fields(self):
+        """Test KnowledgeBaseRefResolutionResult has correct fields."""
+        resolved = [
+            ResolvedKnowledgeBaseRef(
+                kb_id=1,
+                namespace="default",
+                name="kb1",
+                display_name="KB1",
+                folder_ids=[10],
+                document_ids=None,
+                include_subfolders=True,
+                scope_restricted=True,
+                resolved_document_ids=[101],
+            )
+        ]
+        not_found = [{"namespace": "default", "name": "missing"}]
+        no_access = [{"namespace": "org", "name": "private"}]
+        invalid_scope = [
+            {
+                "namespace": "default",
+                "name": "kb1",
+                "error": "Folder 999 not found in this knowledge base",
+            }
+        ]
+
+        result = KnowledgeBaseRefResolutionResult(
+            resolved=resolved,
+            not_found=not_found,
+            no_access=no_access,
+            invalid_scope=invalid_scope,
+        )
+
+        assert len(result.resolved) == 1
+        assert len(result.not_found) == 1
+        assert len(result.no_access) == 1
+        assert len(result.invalid_scope) == 1

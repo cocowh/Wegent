@@ -80,7 +80,8 @@ def parse_wegent_tools(tools: Optional[List[WegentTool]]) -> Dict[str, Any]:
         - mcp_servers: dict (custom MCP server configurations, format: {name: config})
         - preload_skills: list (skills to preload for the bot)
         - workspace: dict (git workspace info for code tasks, contains git_url, branch, git_repo, git_domain)
-        - knowledge_base_names: list (knowledge base names in 'namespace#name' format)
+        - knowledge_base_names: list (backward-compatible parsed KB names)
+        - knowledge_base_refs: list (parsed KB refs with optional scope)
     """
     result: Dict[str, Any] = {
         "enable_chat_bot": False,
@@ -88,6 +89,7 @@ def parse_wegent_tools(tools: Optional[List[WegentTool]]) -> Dict[str, Any]:
         "preload_skills": [],
         "workspace": None,
         "knowledge_base_names": [],
+        "knowledge_base_refs": [],
     }
     if tools:
         for tool in tools:
@@ -126,11 +128,74 @@ def parse_wegent_tools(tools: Optional[List[WegentTool]]) -> Dict[str, Any]:
             elif tool.type == "skill" and tool.preload_skills:
                 # Add skills to preload_skills list
                 result["preload_skills"].extend(tool.preload_skills)
-            elif tool.type == "knowledge_base" and tool.knowledge_base_names:
-                # Parse and validate knowledge base names
+            elif tool.type == "knowledge_base":
+                if tool.knowledge_base_refs and tool.knowledge_base_names:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=(
+                            "knowledge_base_refs and knowledge_base_names cannot "
+                            "be used together"
+                        ),
+                    )
+
+                if tool.knowledge_base_refs:
+                    if tool.folder_ids is not None or tool.document_ids is not None:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=(
+                                "Top-level folder_ids/document_ids cannot be used "
+                                "with knowledge_base_refs. Put scope inside each "
+                                "knowledge_base_refs item."
+                            ),
+                        )
+                    for kb_ref in tool.knowledge_base_refs:
+                        parsed = parse_knowledge_base_name(kb_ref.name)
+                        ref = {
+                            "namespace": parsed["namespace"],
+                            "name": parsed["name"],
+                            "folder_ids": kb_ref.folder_ids,
+                            "document_ids": kb_ref.document_ids,
+                            "include_subfolders": kb_ref.include_subfolders,
+                        }
+                        result["knowledge_base_names"].append(parsed)
+                        result["knowledge_base_refs"].append(ref)
+                    continue
+
+                if not tool.knowledge_base_names:
+                    if tool.folder_ids is not None or tool.document_ids is not None:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=(
+                                "folder_ids/document_ids require a knowledge base "
+                                "target. Provide knowledge_base_names or "
+                                "knowledge_base_refs."
+                            ),
+                        )
+                    continue
+
+                if (
+                    tool.folder_ids is not None or tool.document_ids is not None
+                ) and len(tool.knowledge_base_names) != 1:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=(
+                            "Top-level folder_ids/document_ids can only be used "
+                            "with exactly one knowledge_base_names entry. Use "
+                            "knowledge_base_refs for per-KB scope."
+                        ),
+                    )
+
                 for kb_name in tool.knowledge_base_names:
                     parsed = parse_knowledge_base_name(kb_name)
+                    ref = {
+                        "namespace": parsed["namespace"],
+                        "name": parsed["name"],
+                        "folder_ids": tool.folder_ids,
+                        "document_ids": tool.document_ids,
+                        "include_subfolders": tool.include_subfolders,
+                    }
                     result["knowledge_base_names"].append(parsed)
+                    result["knowledge_base_refs"].append(ref)
     return result
 
 

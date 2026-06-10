@@ -9,7 +9,9 @@ Compatible with OpenAI Responses API format.
 
 from typing import Any, Dict, List, Literal, Optional, Union
 
-from pydantic import BaseModel, Field, conint, conlist
+from pydantic import BaseModel, Field, conint, conlist, model_validator
+
+from app.schemas.scope_validation import validate_document_ids, validate_folder_ids
 
 # Maximum number of attachment IDs allowed per request
 MAX_ATTACHMENT_IDS = 100
@@ -24,6 +26,35 @@ class WorkspaceConfig(BaseModel):
         default=None,
         description="Repository name (e.g., 'user/repo'). Will be extracted from git_url if not provided",
     )
+
+
+class KnowledgeBaseToolRef(BaseModel):
+    """Structured knowledge base reference with optional search scope."""
+
+    name: str = Field(
+        ...,
+        min_length=1,
+        description="Knowledge base name in 'namespace#name' format or just name.",
+    )
+    folder_ids: Optional[List[int]] = Field(
+        default=None,
+        description="Folder IDs to restrict KB scope. Use [0] for root documents.",
+    )
+    document_ids: Optional[List[int]] = Field(
+        default=None,
+        description="Document IDs to restrict KB scope.",
+    )
+    include_subfolders: bool = Field(
+        default=True,
+        description="Whether folder_ids include descendant folders.",
+    )
+
+    @model_validator(mode="after")
+    def validate_scope_fields(self) -> "KnowledgeBaseToolRef":
+        """Normalize and validate optional scope fields."""
+        self.folder_ids = validate_folder_ids(self.folder_ids)
+        self.document_ids = validate_document_ids(self.document_ids)
+        return self
 
 
 class WegentTool(BaseModel):
@@ -46,7 +77,7 @@ class WegentTool(BaseModel):
     - Use wegent_code_bot to enable code tasks with a git repository
     - Use mcp type with mcp_servers to add custom MCP servers
     - Use skill type with skills to preload specific skills
-    - Use knowledge_base type with knowledge_base_names to enable RAG on specific KBs
+    - Use knowledge_base type with knowledge_base_refs to enable RAG on specific KBs
 
     Examples:
         # Enable all server-side capabilities
@@ -78,7 +109,10 @@ class WegentTool(BaseModel):
         # Enable knowledge base RAG with specific KBs
         {
             "type": "knowledge_base",
-            "knowledge_base_names": ["default#my_kb", "org#team_kb"]
+            "knowledge_base_refs": [
+                {"name": "default#my_kb", "folder_ids": [0]},
+                {"name": "org#team_kb"}
+            ]
         }
     """
 
@@ -102,6 +136,32 @@ class WegentTool(BaseModel):
         default=None,
         description="List of knowledge base names in 'namespace#name' format. Required when type='knowledge_base'",
     )
+    knowledge_base_refs: Optional[List[KnowledgeBaseToolRef]] = Field(
+        default=None,
+        description="Structured knowledge base references with optional folder/document scope.",
+    )
+    folder_ids: Optional[List[int]] = Field(
+        default=None,
+        description="Convenience scope for a single knowledge_base_names entry.",
+    )
+    document_ids: Optional[List[int]] = Field(
+        default=None,
+        description="Convenience document scope for a single knowledge_base_names entry.",
+    )
+    include_subfolders: bool = Field(
+        default=True,
+        description="Whether folder_ids include descendant folders.",
+    )
+
+    @model_validator(mode="after")
+    def validate_knowledge_base_scope(self) -> "WegentTool":
+        """Validate knowledge_base tool scope fields."""
+        if self.type != "knowledge_base":
+            return self
+
+        self.folder_ids = validate_folder_ids(self.folder_ids)
+        self.document_ids = validate_document_ids(self.document_ids)
+        return self
 
 
 class InputTextContent(BaseModel):

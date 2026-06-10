@@ -34,6 +34,25 @@ def test_to_execution_request_normalizes_null_kb_tool_access_mode():
     assert request.kb_tool_access_mode == KnowledgeBaseToolAccessMode.FULL
 
 
+def test_to_execution_request_normalizes_scope_restricted_bool_metadata():
+    openai_request = {
+        "model": "test-model",
+        "input": "hello",
+        "metadata": {
+            "scope_restricted": "false",
+        },
+    }
+
+    request = OpenAIRequestConverter.to_execution_request(openai_request)
+
+    assert request.scope_restricted is False
+
+    openai_request["metadata"]["scope_restricted"] = "true"
+    request = OpenAIRequestConverter.to_execution_request(openai_request)
+
+    assert request.scope_restricted is True
+
+
 def test_round_trip_preserves_skill_reference_metadata():
     request = ExecutionRequest(
         skill_names=["analysis-skill"],

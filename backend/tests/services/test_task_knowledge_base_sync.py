@@ -427,6 +427,49 @@ class TestKBPriorityLogic:
                         kb_result.enhanced_system_prompt
                     )
 
+    def test_mixed_scoped_and_unscoped_kbs_expands_unscoped_documents(self, mock_db):
+        """Scoped empty KBs must not disable unscoped KBs in the same request."""
+        from app.services.chat.preprocessing.contexts import (
+            _prepare_kb_tools_from_contexts,
+        )
+
+        scoped_kb = Mock(spec=SubtaskContext)
+        scoped_kb.knowledge_id = 10
+        scoped_kb.type_data = {"scope_restricted": True, "document_ids": []}
+
+        unscoped_kb = Mock(spec=SubtaskContext)
+        unscoped_kb.knowledge_id = 20
+        unscoped_kb.type_data = None
+
+        with patch(
+            "app.services.chat.preprocessing.contexts._get_document_ids_for_knowledge_bases",
+            return_value=[201, 202],
+        ) as mock_get_doc_ids:
+            with patch("chat_shell.tools.builtin.KnowledgeBaseTool") as mock_kb_tool:
+                mock_kb_tool.return_value = Mock()
+
+                with patch(
+                    "app.services.chat.preprocessing.contexts._get_user_kb_tool_access_mode",
+                    return_value=("full", ""),
+                ):
+                    kb_result = _prepare_kb_tools_from_contexts(
+                        kb_contexts=[scoped_kb, unscoped_kb],
+                        user_id=1,
+                        db=mock_db,
+                        base_system_prompt="Base prompt",
+                        task_id=100,
+                        user_subtask_id=1,
+                    )
+
+        mock_get_doc_ids.assert_called_once_with(mock_db, [20])
+        mock_kb_tool.assert_called_once()
+        call_args = mock_kb_tool.call_args
+        assert call_args[1]["knowledge_base_ids"] == [10, 20]
+        assert call_args[1]["document_ids"] == [201, 202]
+        assert kb_result.knowledge_base_ids == [10, 20]
+        assert kb_result.document_ids == [201, 202]
+        assert kb_result.scope_restricted is True
+
     def test_no_kb_when_both_empty(self, mock_db):
         """Test that no KB tool is created when both levels have no KB"""
         from app.services.chat.preprocessing.contexts import (

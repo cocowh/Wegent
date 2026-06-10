@@ -779,17 +779,22 @@ def _prepare_contexts_for_creation(
                 knowledge_id = kb_data.get("knowledge_id")
                 kb_name = kb_data.get("name", f"Knowledge Base {knowledge_id}")
                 document_count = kb_data.get("document_count")
-                # Get document_ids if user referenced specific documents
+                scope_restricted = bool(kb_data.get("scope_restricted", False))
                 document_ids = kb_data.get("document_ids", [])
 
-                # Build type_data
                 type_data_dict = {
                     "knowledge_id": int(knowledge_id) if knowledge_id else 0,
                     "document_count": document_count,
                 }
-                # Only add document_ids if provided
-                if document_ids:
+                if scope_restricted:
+                    type_data_dict["scope_restricted"] = True
+                if "document_ids" in kb_data:
                     type_data_dict["document_ids"] = document_ids
+                if "folder_ids" in kb_data:
+                    type_data_dict["folder_ids"] = kb_data.get("folder_ids")
+                    type_data_dict["include_subfolders"] = kb_data.get(
+                        "include_subfolders", True
+                    )
 
                 # Create SubtaskContext object (not yet committed)
                 kb_context = SubtaskContext(
@@ -1154,6 +1159,7 @@ async def prepare_contexts_for_chat(
         knowledge_base_ids=kb_result.knowledge_base_ids,
         is_user_selected_kb=kb_result.is_user_selected_kb,
         document_ids=kb_result.document_ids,
+        scope_restricted=kb_result.scope_restricted,
         kb_tool_access_mode=kb_result.kb_tool_access_mode,
     )
     return ChatContextsResult(
@@ -1288,13 +1294,24 @@ def _prepare_kb_tools_from_contexts(
     else:
         knowledge_base_ids = []
 
-    # Extract document_ids from subtask KB contexts (no extra DB query needed).
-    # Normalize to int, skip invalid values, and deduplicate while preserving order.
+    # Extract document_ids from subtask KB contexts.
+    # If any selected KB is scoped, unscoped selected KBs are expanded to all of
+    # their documents so the existing global document_ids filter can still
+    # represent mixed scoped/unscoped requests without disabling the unscoped KBs.
     document_ids: List[int] = []
+    scope_restricted = False
     if is_user_selected_kb:
         seen_doc_ids: set[int] = set()
+        unscoped_kb_ids: list[int] = []
         for c in kb_contexts:
+            if c.knowledge_id is None:
+                continue
             if c.type_data and isinstance(c.type_data, dict):
+                if c.type_data.get("scope_restricted") is True:
+                    scope_restricted = True
+                if "document_ids" not in c.type_data:
+                    unscoped_kb_ids.append(c.knowledge_id)
+                    continue
                 raw_doc_ids = c.type_data.get("document_ids", [])
                 if isinstance(raw_doc_ids, list):
                     for doc_id in raw_doc_ids:
@@ -1311,6 +1328,14 @@ def _prepare_kb_tools_from_contexts(
                         if normalized not in seen_doc_ids:
                             seen_doc_ids.add(normalized)
                             document_ids.append(normalized)
+            else:
+                unscoped_kb_ids.append(c.knowledge_id)
+
+        if scope_restricted and unscoped_kb_ids:
+            for doc_id in _get_document_ids_for_knowledge_bases(db, unscoped_kb_ids):
+                if doc_id not in seen_doc_ids:
+                    seen_doc_ids.add(doc_id)
+                    document_ids.append(doc_id)
 
     if not knowledge_base_ids:
         return KnowledgeBaseToolsResult(
@@ -1320,6 +1345,23 @@ def _prepare_kb_tools_from_contexts(
             knowledge_base_ids=[],
             is_user_selected_kb=False,
             document_ids=[],
+            scope_restricted=scope_restricted,
+            kb_tool_access_mode=KnowledgeBaseToolAccessMode.FULL,
+        )
+
+    if scope_restricted and not document_ids:
+        logger.info(
+            "[_prepare_kb_tools_from_contexts] KB scope is restricted but resolved "
+            "to no documents; skipping KB tool creation"
+        )
+        return KnowledgeBaseToolsResult(
+            extra_tools=extra_tools,
+            enhanced_system_prompt=enhanced_system_prompt,
+            kb_meta_prompt="",
+            knowledge_base_ids=knowledge_base_ids,
+            is_user_selected_kb=is_user_selected_kb,
+            document_ids=[],
+            scope_restricted=True,
             kb_tool_access_mode=KnowledgeBaseToolAccessMode.FULL,
         )
 
@@ -1401,6 +1443,7 @@ def _prepare_kb_tools_from_contexts(
         knowledge_base_ids=knowledge_base_ids,
         is_user_selected_kb=is_user_selected_kb,
         document_ids=document_ids,
+        scope_restricted=scope_restricted,
         kb_tool_access_mode=kb_tool_access_mode,
     )
 
@@ -1440,7 +1483,22 @@ def _get_bound_knowledge_base_ids(db: Session, task_id: int) -> List[int]:
         # Catch all exceptions to ensure robustness - this function should
         # never block chat functionality even if KB lookup fails
         logger.warning(f"Failed to get bound KB IDs for task {task_id}: {e}")
+    return []
+
+
+def _get_document_ids_for_knowledge_bases(
+    db: Session, knowledge_base_ids: List[int]
+) -> List[int]:
+    """Return document IDs for the given knowledge bases in stable order."""
+    if not knowledge_base_ids:
         return []
+    rows = (
+        db.query(KnowledgeDocument.id)
+        .filter(KnowledgeDocument.kind_id.in_(knowledge_base_ids))
+        .order_by(KnowledgeDocument.kind_id, KnowledgeDocument.id)
+        .all()
+    )
+    return [row[0] for row in rows]
 
 
 def _build_kb_meta_prompt(

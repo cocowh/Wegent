@@ -89,11 +89,13 @@ class TestParseWegentToolsWithKnowledgeBase:
 
         # Assert
         assert len(result["knowledge_base_names"]) == 2
+        assert len(result["knowledge_base_refs"]) == 2
         assert result["knowledge_base_names"][0] == {
             "namespace": "default",
             "name": "kb1",
         }
         assert result["knowledge_base_names"][1] == {"namespace": "org", "name": "kb2"}
+        assert result["knowledge_base_refs"][0]["folder_ids"] is None
 
     def test_parse_knowledge_base_without_names(self):
         """Test parsing knowledge_base tool without knowledge_base_names."""
@@ -105,6 +107,7 @@ class TestParseWegentToolsWithKnowledgeBase:
 
         # Assert
         assert result["knowledge_base_names"] == []
+        assert result["knowledge_base_refs"] == []
 
     def test_parse_knowledge_base_with_default_namespace(self):
         """Test parsing knowledge_base tool with names without explicit namespace."""
@@ -120,6 +123,110 @@ class TestParseWegentToolsWithKnowledgeBase:
             "namespace": "default",
             "name": "kb1",
         }
+        assert result["knowledge_base_refs"][0] == {
+            "namespace": "default",
+            "name": "kb1",
+            "folder_ids": None,
+            "document_ids": None,
+            "include_subfolders": True,
+        }
+
+    def test_parse_knowledge_base_refs_with_per_kb_scope(self):
+        """Structured refs keep scope attached to the intended KB."""
+        tools = [
+            WegentTool(
+                type="knowledge_base",
+                knowledge_base_refs=[
+                    {
+                        "name": "default#kb1",
+                        "folder_ids": [3, 3],
+                        "include_subfolders": False,
+                    },
+                    {"name": "org#kb2", "document_ids": [9, 9, 10]},
+                ],
+            )
+        ]
+
+        result = parse_wegent_tools(tools)
+
+        assert result["knowledge_base_names"] == [
+            {"namespace": "default", "name": "kb1"},
+            {"namespace": "org", "name": "kb2"},
+        ]
+        assert result["knowledge_base_refs"] == [
+            {
+                "namespace": "default",
+                "name": "kb1",
+                "folder_ids": [3],
+                "document_ids": None,
+                "include_subfolders": False,
+            },
+            {
+                "namespace": "org",
+                "name": "kb2",
+                "folder_ids": None,
+                "document_ids": [9, 10],
+                "include_subfolders": True,
+            },
+        ]
+
+    def test_parse_knowledge_base_names_rejects_top_level_scope_for_many_kbs(self):
+        """Top-level scope is only unambiguous for a single legacy KB name."""
+        tools = [
+            WegentTool(
+                type="knowledge_base",
+                knowledge_base_names=["default#kb1", "default#kb2"],
+                folder_ids=[0],
+            )
+        ]
+
+        with pytest.raises(HTTPException) as exc_info:
+            parse_wegent_tools(tools)
+
+        assert exc_info.value.status_code == 400
+        assert "exactly one" in exc_info.value.detail
+
+    def test_parse_knowledge_base_rejects_names_and_refs_together(self):
+        """Callers must choose either legacy names or structured refs."""
+        tools = [
+            WegentTool(
+                type="knowledge_base",
+                knowledge_base_names=["default#kb1"],
+                knowledge_base_refs=[{"name": "default#kb1"}],
+            )
+        ]
+
+        with pytest.raises(HTTPException) as exc_info:
+            parse_wegent_tools(tools)
+
+        assert exc_info.value.status_code == 400
+        assert "cannot be used together" in exc_info.value.detail
+
+    def test_parse_knowledge_base_refs_rejects_top_level_scope(self):
+        """Scope for structured refs must be attached to each KB ref."""
+        tools = [
+            WegentTool(
+                type="knowledge_base",
+                knowledge_base_refs=[{"name": "default#kb1"}],
+                folder_ids=[0],
+            )
+        ]
+
+        with pytest.raises(HTTPException) as exc_info:
+            parse_wegent_tools(tools)
+
+        assert exc_info.value.status_code == 400
+        assert "Put scope inside each" in exc_info.value.detail
+
+    def test_parse_knowledge_base_rejects_scope_without_kb_target(self):
+        """Top-level scope is invalid without an explicit KB target."""
+        tools = [WegentTool(type="knowledge_base", folder_ids=[0])]
+
+        with pytest.raises(HTTPException) as exc_info:
+            parse_wegent_tools(tools)
+
+        assert exc_info.value.status_code == 400
+        assert "require a knowledge base target" in exc_info.value.detail
 
     def test_parse_mixed_tools(self):
         """Test parsing mixed tool types including knowledge_base."""

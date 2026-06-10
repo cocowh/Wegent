@@ -100,6 +100,7 @@ POST /api/v1/responses
 |----------|------|
 | `wegent_chat_bot` | 启用所有服务端能力（深度思考、网络搜索、服务端 MCP 工具、消息增强） |
 | `wegent_code_bot` | 启用代码任务并指定 Git 仓库（用于 Executor 类型的 Team） |
+| `knowledge_base` | 启用知识库 RAG，可挂载整库，也可限定目录或文档范围 |
 | `mcp` | 添加自定义 MCP 服务器 |
 | `skill` | 预加载特定技能 |
 
@@ -150,6 +151,59 @@ POST /api/v1/responses
   ]
 }
 ```
+
+**知识库配置：**
+
+整库范围使用旧格式即可，不传 `folder_ids` 或 `document_ids`：
+
+```json
+{
+  "tools": [
+    {
+      "type": "knowledge_base",
+      "knowledge_base_names": ["default#产品知识库"]
+    }
+  ]
+}
+```
+
+需要限定目录或文档范围时，推荐使用 `knowledge_base_refs`。范围字段写在每个知识库 ref 内：
+
+```json
+{
+  "tools": [
+    {
+      "type": "knowledge_base",
+      "knowledge_base_refs": [
+        {
+          "name": "default#产品知识库",
+          "folder_ids": [10],
+          "include_subfolders": true
+        }
+      ]
+    }
+  ]
+}
+```
+
+| 字段 | 类型 | 描述 |
+|------|------|------|
+| `knowledge_base_names` | string[] | 兼容旧格式，挂载指定知识库；不带范围字段时表示整库 |
+| `knowledge_base_refs` | object[] | 推荐格式，每个元素包含 `name` 和可选范围字段 |
+| `folder_ids` | integer[] | 限定目录范围；`0` 表示根目录直接文档 |
+| `document_ids` | integer[] | 限定指定文档 |
+| `include_subfolders` | boolean | 目录范围是否包含子目录，默认 `true` |
+
+规则：
+
+- 整库 RAG：不要传 `folder_ids` 或 `document_ids`。
+- `folder_ids=[0]` 只表示根目录直接文档，即使 `include_subfolders=true` 也不是整库。
+- `folder_ids=[]` 和 `document_ids=[]` 是非法参数，不能用空数组表示整库。
+- `knowledge_base_refs` 与 `knowledge_base_names` 互斥，不能同时传。
+- 使用 `knowledge_base_refs` 时，范围字段必须写入每个 ref 内；不要再传顶层 `folder_ids` 或 `document_ids`。
+- 单知识库便捷写法可以使用 `knowledge_base_names` 加顶层范围字段；多知识库带范围必须使用 `knowledge_base_refs`。
+
+如果需要查询目录 ID、移动文档或直接调用 `/api/knowledge/search`，请参考 [知识库开放接口](./knowledge-open-api.md)。
 
 #### 响应行为
 

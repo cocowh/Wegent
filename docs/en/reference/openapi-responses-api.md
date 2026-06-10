@@ -100,6 +100,7 @@ The `tools` array enables additional server-side capabilities:
 |-----------|-------------|
 | `wegent_chat_bot` | Enable all server-side capabilities (deep thinking, web search, server MCP tools, message enhancement) |
 | `wegent_code_bot` | Enable code task with git repository (for Executor-based Teams) |
+| `knowledge_base` | Enable knowledge base RAG, either for the whole knowledge base or for scoped folders/documents |
 | `mcp` | Add custom MCP servers |
 | `skill` | Preload specific skills |
 
@@ -150,6 +151,59 @@ The `tools` array enables additional server-side capabilities:
   ]
 }
 ```
+
+**Knowledge Base Configuration:**
+
+Use the legacy format for whole-knowledge-base RAG. Do not pass `folder_ids` or `document_ids`:
+
+```json
+{
+  "tools": [
+    {
+      "type": "knowledge_base",
+      "knowledge_base_names": ["default#product-kb"]
+    }
+  ]
+}
+```
+
+For folder- or document-scoped RAG, prefer `knowledge_base_refs`. Put the scope fields inside each knowledge base ref:
+
+```json
+{
+  "tools": [
+    {
+      "type": "knowledge_base",
+      "knowledge_base_refs": [
+        {
+          "name": "default#product-kb",
+          "folder_ids": [10],
+          "include_subfolders": true
+        }
+      ]
+    }
+  ]
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `knowledge_base_names` | string[] | Backward-compatible format for selecting knowledge bases; without scope fields, it means whole knowledge base |
+| `knowledge_base_refs` | object[] | Recommended format; each item contains `name` and optional scope fields |
+| `folder_ids` | integer[] | Limit retrieval to folders; `0` means documents directly under the root |
+| `document_ids` | integer[] | Limit retrieval to specific documents |
+| `include_subfolders` | boolean | Whether folder scope includes subfolders, default `true` |
+
+Rules:
+
+- For whole-knowledge-base RAG, omit both `folder_ids` and `document_ids`.
+- `folder_ids=[0]` means root-level documents only. It is not whole-knowledge-base RAG, even when `include_subfolders=true`.
+- `folder_ids=[]` and `document_ids=[]` are invalid. Empty arrays must not be used to mean whole knowledge base.
+- `knowledge_base_refs` and `knowledge_base_names` are mutually exclusive.
+- When using `knowledge_base_refs`, put scope fields inside each ref; do not also pass top-level `folder_ids` or `document_ids`.
+- The single-knowledge-base shorthand may use `knowledge_base_names` plus top-level scope fields. Multi-knowledge-base scoped calls must use `knowledge_base_refs`.
+
+To look up folder IDs, move documents, or call `/api/knowledge/search` directly, see [Knowledge Open API](./knowledge-open-api.md).
 
 #### Response Behavior
 

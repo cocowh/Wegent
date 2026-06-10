@@ -453,12 +453,12 @@ async def _create_non_streaming_response_unified(
     preload_skills = tool_settings.get("preload_skills", [])
     user_id = user.id
 
-    # Extract knowledge base names from tool settings
-    knowledge_base_names = tool_settings.get("knowledge_base_names", [])
+    # Extract knowledge base references from tool settings.
+    knowledge_base_refs = tool_settings.get("knowledge_base_refs", [])
 
     # Auto-enable tools when knowledge_base is specified
     # This ensures KB tools and skill tools are actually added to the agent
-    enable_tools = enable_chat_bot or bool(knowledge_base_names)
+    enable_tools = enable_chat_bot or bool(knowledge_base_refs)
 
     # Link attachments to user subtask if provided
     if request_body.attachment_ids:
@@ -492,9 +492,17 @@ async def _create_non_streaming_response_unified(
             enable_deep_thinking=enable_chat_bot,
             enable_web_search=enable_chat_bot and settings.WEB_SEARCH_ENABLED,
             preload_skills=preload_skills,
-            knowledge_base_names=knowledge_base_names,
+            knowledge_base_refs=knowledge_base_refs,
             reasoning_config=reasoning_config,
         )
+    except HTTPException as e:
+        logger.error(f"Failed to build execution request: {e.detail}")
+        await _persist_terminal_failure(
+            subtask_id=assistant_subtask_id,
+            task_id=task_kind_id,
+            error_message=str(e.detail),
+        )
+        raise
     except Exception as e:
         logger.error(f"Failed to build execution request: {e}")
         await _persist_terminal_failure(
@@ -755,12 +763,12 @@ async def _create_streaming_response_unified(
     user_id = user.id
     user_name = user.user_name
 
-    # Extract knowledge base names from tool settings
-    knowledge_base_names = tool_settings.get("knowledge_base_names", [])
+    # Extract knowledge base references from tool settings.
+    knowledge_base_refs = tool_settings.get("knowledge_base_refs", [])
 
     # Auto-enable tools when knowledge_base is specified
     # This ensures KB tools and skill tools are actually added to the agent
-    enable_tools = enable_chat_bot or bool(knowledge_base_names)
+    enable_tools = enable_chat_bot or bool(knowledge_base_refs)
 
     # Link attachments to user subtask if provided
     if request_body.attachment_ids:
@@ -794,9 +802,17 @@ async def _create_streaming_response_unified(
             enable_deep_thinking=enable_chat_bot,
             enable_web_search=enable_chat_bot and settings.WEB_SEARCH_ENABLED,
             preload_skills=preload_skills,
-            knowledge_base_names=knowledge_base_names,
+            knowledge_base_refs=knowledge_base_refs,
             reasoning_config=reasoning_config,
         )
+    except HTTPException as e:
+        logger.error(f"Failed to build execution request: {e.detail}")
+        await _persist_terminal_failure(
+            subtask_id=assistant_subtask_id,
+            task_id=task_kind_id,
+            error_message=str(e.detail),
+        )
+        raise
     except Exception as e:
         logger.error(f"Failed to build execution request: {e}")
         await _persist_terminal_failure(

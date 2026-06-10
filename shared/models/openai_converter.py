@@ -32,6 +32,17 @@ def normalize_kb_tool_access_mode(value: Optional[str]) -> str:
     return value or KnowledgeBaseToolAccessMode.FULL
 
 
+def normalize_bool_metadata(value: Any) -> bool:
+    """Normalize loosely typed metadata values to strict bool."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value == 1
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true"}
+    return False
+
+
 def get_metadata_field(task: dict, field: str, default=None):
     """Get a field from OpenAI metadata or legacy top-level dict.
 
@@ -171,6 +182,7 @@ class OpenAIRequestConverter:
             "preload_skill_refs": request.preload_skill_refs,
             "knowledge_base_ids": request.knowledge_base_ids,
             "document_ids": request.document_ids,
+            "scope_restricted": request.scope_restricted,
             "is_user_selected_kb": request.is_user_selected_kb,
             "kb_tool_access_mode": normalize_kb_tool_access_mode(
                 request.kb_tool_access_mode
@@ -292,6 +304,10 @@ class OpenAIRequestConverter:
                 "[to_execution_request] user_dict was None, using empty dict"
             )
 
+        scope_restricted = normalize_bool_metadata(
+            metadata.get("scope_restricted", False)
+        )
+
         return ExecutionRequest(
             task_id=metadata.get("task_id", 0),
             subtask_id=metadata.get("subtask_id", 0),
@@ -329,6 +345,7 @@ class OpenAIRequestConverter:
             mcp_servers=mcp_servers,
             knowledge_base_ids=metadata.get("knowledge_base_ids"),
             document_ids=metadata.get("document_ids"),
+            scope_restricted=scope_restricted,
             is_user_selected_kb=metadata.get("is_user_selected_kb", True),
             kb_tool_access_mode=normalize_kb_tool_access_mode(
                 metadata.get("kb_tool_access_mode")

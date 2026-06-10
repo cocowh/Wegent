@@ -30,6 +30,7 @@ async def prepare_knowledge_base_tools(
     user_subtask_id: Optional[int] = None,
     is_user_selected: bool = True,
     document_ids: Optional[list[int]] = None,
+    scope_restricted: bool = False,
     model_id: Optional[str] = None,
     context_window: Optional[int] = None,
     model_config: Optional[dict[str, Any]] = None,
@@ -62,6 +63,22 @@ async def prepare_knowledge_base_tools(
             extra_tools=extra_tools,
             enhanced_system_prompt=enhanced_system_prompt,
             kb_meta_prompt="",
+        )
+
+    if scope_restricted and not document_ids:
+        logger.info(
+            "[knowledge_factory] KB scope is restricted but resolved to no documents; "
+            "skipping KB tool creation"
+        )
+        return KnowledgeBaseToolsResult(
+            extra_tools=extra_tools,
+            enhanced_system_prompt=enhanced_system_prompt,
+            kb_meta_prompt="",
+            knowledge_base_ids=knowledge_base_ids,
+            is_user_selected_kb=is_user_selected,
+            document_ids=[],
+            scope_restricted=True,
+            kb_tool_access_mode=kb_tool_access_mode,
         )
 
     logger.info(
@@ -161,6 +178,10 @@ async def prepare_knowledge_base_tools(
             extra_tools=extra_tools,
             enhanced_system_prompt=enhanced_system_prompt,
             kb_meta_prompt="",
+            knowledge_base_ids=knowledge_base_ids,
+            is_user_selected_kb=is_user_selected,
+            document_ids=document_ids or [],
+            scope_restricted=scope_restricted,
             kb_tool_access_mode=kb_tool_access_mode,
         )
 
@@ -183,6 +204,10 @@ async def prepare_knowledge_base_tools(
             extra_tools=extra_tools,
             enhanced_system_prompt=enhanced_system_prompt,
             kb_meta_prompt="",
+            knowledge_base_ids=knowledge_base_ids,
+            is_user_selected_kb=is_user_selected,
+            document_ids=document_ids or [],
+            scope_restricted=scope_restricted,
             kb_tool_access_mode=kb_tool_access_mode,
         )
 
@@ -219,6 +244,10 @@ async def prepare_knowledge_base_tools(
         extra_tools=extra_tools,
         enhanced_system_prompt=enhanced_system_prompt,
         kb_meta_prompt="",
+        knowledge_base_ids=knowledge_base_ids,
+        is_user_selected_kb=is_user_selected,
+        document_ids=document_ids or [],
+        scope_restricted=scope_restricted,
         kb_tool_access_mode=kb_tool_access_mode,
     )
 

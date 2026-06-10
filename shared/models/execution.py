@@ -126,6 +126,7 @@ class ExecutionRequest:
     # === Knowledge Base Configuration ===
     knowledge_base_ids: Optional[list] = None
     document_ids: Optional[list] = None
+    scope_restricted: bool = False
     table_contexts: list = field(default_factory=list)
     is_user_selected_kb: bool = True
     kb_tool_access_mode: str = KnowledgeBaseToolAccessMode.FULL
