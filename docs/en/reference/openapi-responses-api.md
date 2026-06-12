@@ -202,6 +202,7 @@ Rules:
 - `knowledge_base_refs` and `knowledge_base_names` are mutually exclusive.
 - When using `knowledge_base_refs`, put scope fields inside each ref; do not also pass top-level `folder_ids` or `document_ids`.
 - The single-knowledge-base shorthand may use `knowledge_base_names` plus top-level scope fields. Multi-knowledge-base scoped calls must use `knowledge_base_refs`.
+- For Chat Shell responses, folder or document scope is an access boundary for the current knowledge tools: `knowledge_base_search`, `kb_ls`, and `kb_head` can only search, list, or read the resolved accessible documents. Tool calls with out-of-scope `document_ids` are rejected.
 
 To look up folder IDs, move documents, or call `/api/knowledge/search` directly, see [Knowledge Open API](./knowledge-open-api.md).
 

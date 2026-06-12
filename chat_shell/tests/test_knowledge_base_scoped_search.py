@@ -10,6 +10,20 @@ import pytest
 from chat_shell.tools.builtin import KnowledgeBaseTool
 
 
+def _rag_enabled_kb_info() -> dict:
+    return {
+        "items": [
+            {
+                "id": 1,
+                "name": "Test KB",
+                "rag_enabled": True,
+                "max_calls_per_conversation": 10,
+                "exempt_calls_before_check": 5,
+            }
+        ]
+    }
+
+
 def test_knowledge_base_input_supports_document_names():
     from chat_shell.tools.builtin.knowledge_base import KnowledgeBaseInput
 
@@ -119,7 +133,7 @@ async def test_arun_preserves_backend_scoped_search_error_message():
 
 
 @pytest.mark.asyncio
-async def test_arun_passes_scoped_filters_without_mutating_tool_defaults():
+async def test_arun_unscoped_passes_call_filters_without_mutating_tool_defaults():
     tool = KnowledgeBaseTool(
         knowledge_base_ids=[1],
         user_id=7,
@@ -174,3 +188,130 @@ async def test_arun_passes_scoped_filters_without_mutating_tool_defaults():
 
     assert tool.document_ids == [999]
     assert tool.document_names == ["default.md"]
+
+
+@pytest.mark.asyncio
+async def test_arun_scoped_uses_default_allowed_documents_when_call_has_no_ids():
+    tool = KnowledgeBaseTool(
+        knowledge_base_ids=[1],
+        user_id=7,
+        document_ids=[101, 102],
+        scope_restricted=True,
+    )
+
+    async def _fake_retrieve(**kwargs):
+        assert kwargs["document_ids"] == [101, 102]
+        assert kwargs["document_names"] == []
+        return (
+            "rag_retrieval",
+            {
+                "mode": "rag_retrieval",
+                "records": [],
+                "total": 0,
+                "total_estimated_tokens": 0,
+            },
+        )
+
+    with (
+        patch.object(
+            tool, "_get_kb_info", AsyncMock(return_value=_rag_enabled_kb_info())
+        ),
+        patch.object(
+            tool,
+            "_retrieve_with_strategy_from_all_kbs",
+            AsyncMock(side_effect=_fake_retrieve),
+        ) as retrieve,
+    ):
+        await tool._arun(query="release checklist")
+
+    retrieve.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_arun_scoped_allows_document_id_subset_without_mutating_defaults():
+    tool = KnowledgeBaseTool(
+        knowledge_base_ids=[1],
+        user_id=7,
+        document_ids=[101, 102],
+        scope_restricted=True,
+    )
+
+    async def _fake_retrieve(**kwargs):
+        assert kwargs["document_ids"] == [102]
+        assert kwargs["document_names"] == []
+        assert tool.document_ids == [101, 102]
+        return (
+            "rag_retrieval",
+            {
+                "mode": "rag_retrieval",
+                "records": [],
+                "total": 0,
+                "total_estimated_tokens": 0,
+            },
+        )
+
+    with (
+        patch.object(
+            tool, "_get_kb_info", AsyncMock(return_value=_rag_enabled_kb_info())
+        ),
+        patch.object(
+            tool,
+            "_retrieve_with_strategy_from_all_kbs",
+            AsyncMock(side_effect=_fake_retrieve),
+        ) as retrieve,
+    ):
+        await tool._arun(query="release checklist", document_ids=[102])
+
+    retrieve.assert_awaited_once()
+    assert tool.document_ids == [101, 102]
+
+
+@pytest.mark.asyncio
+async def test_arun_scoped_rejects_out_of_scope_document_ids_before_retrieval():
+    tool = KnowledgeBaseTool(
+        knowledge_base_ids=[1],
+        user_id=7,
+        document_ids=[101],
+        scope_restricted=True,
+    )
+
+    with patch.object(
+        tool,
+        "_retrieve_with_strategy_from_all_kbs",
+        AsyncMock(),
+    ) as retrieve:
+        result = json.loads(
+            await tool._arun(query="release checklist", document_ids=[101, 999])
+        )
+
+    assert result["status"] == "error"
+    assert result["error_code"] == "document_scope_violation"
+    assert result["requested_document_ids"] == [101, 999]
+    assert result["accessible_document_count"] == 1
+    retrieve.assert_not_awaited()
+    assert tool._call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_arun_scoped_rejects_document_names_before_retrieval():
+    tool = KnowledgeBaseTool(
+        knowledge_base_ids=[1],
+        user_id=7,
+        document_ids=[101],
+        scope_restricted=True,
+    )
+
+    with patch.object(
+        tool,
+        "_retrieve_with_strategy_from_all_kbs",
+        AsyncMock(),
+    ) as retrieve:
+        result = json.loads(
+            await tool._arun(query="release checklist", document_names=["secret.md"])
+        )
+
+    assert result["status"] == "error"
+    assert result["error_code"] == "document_scope_violation"
+    assert "document_names are not supported" in result["message"]
+    retrieve.assert_not_awaited()
+    assert tool._call_count == 0

@@ -761,6 +761,10 @@ class ListDocsRequest(BaseModel):
     """Request for listing documents in a knowledge base."""
 
     knowledge_base_id: int = Field(..., description="Knowledge base ID")
+    document_ids: Optional[list[int]] = Field(
+        default=None,
+        description="Optional document allowlist for scoped document listing.",
+    )
     offset: int = Field(default=0, ge=0, description="Start offset for pagination")
     limit: int = Field(
         default=20,
@@ -820,6 +824,10 @@ async def list_documents(
         base_query = db.query(KnowledgeDocument).filter(
             KnowledgeDocument.kind_id == request.knowledge_base_id
         )
+        if request.document_ids is not None:
+            base_query = base_query.filter(
+                KnowledgeDocument.id.in_(request.document_ids)
+            )
         total = base_query.count()
         documents = (
             base_query.order_by(KnowledgeDocument.created_at.desc())

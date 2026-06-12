@@ -202,6 +202,7 @@ POST /api/v1/responses
 - `knowledge_base_refs` 与 `knowledge_base_names` 互斥，不能同时传。
 - 使用 `knowledge_base_refs` 时，范围字段必须写入每个 ref 内；不要再传顶层 `folder_ids` 或 `document_ids`。
 - 单知识库便捷写法可以使用 `knowledge_base_names` 加顶层范围字段；多知识库带范围必须使用 `knowledge_base_refs`。
+- 对 Chat Shell 响应，限定目录或文档范围是本轮知识工具的访问边界：`knowledge_base_search`、`kb_ls`、`kb_head` 只能搜索、列出或读取解析后的可访问文档；工具调用中传入范围外 `document_ids` 会被拒绝。
 
 如果需要查询目录 ID、移动文档或直接调用 `/api/knowledge/search`，请参考 [知识库开放接口](./knowledge-open-api.md)。
 

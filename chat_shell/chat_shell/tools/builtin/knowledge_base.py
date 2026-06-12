@@ -21,6 +21,12 @@ from shared.models.knowledge import KnowledgeBaseToolAccessMode
 from ...compression.config import get_model_context_config
 from ..knowledge_content_cleaner import get_content_cleaner
 from ..knowledge_injection_strategy import InjectionMode, InjectionStrategy
+from .knowledge_scope import (
+    DOCUMENT_SCOPE_OUT_OF_RANGE_MESSAGE,
+    dedupe_document_ids,
+    format_document_scope_violation,
+    get_out_of_scope_document_ids,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +88,7 @@ class KnowledgeBaseTool(BaseTool):
     # When set, only chunks from these documents will be returned
     document_ids: list[int] = Field(default_factory=list)
     document_names: list[str] = Field(default_factory=list)
+    scope_restricted: bool = False
 
     # User ID for access control
     user_id: int = 0
@@ -502,15 +509,72 @@ class KnowledgeBaseTool(BaseTool):
         self,
         document_ids: Optional[list[int]] = None,
         document_names: Optional[list[str]] = None,
-    ) -> tuple[list[int], list[str]]:
+    ) -> tuple[list[int], list[str], Optional[str]]:
         """Resolve per-call filters without mutating tool instance state."""
-        effective_document_ids = (
-            self.document_ids if document_ids is None else document_ids
-        )
+        if not self.scope_restricted:
+            effective_document_ids = (
+                self.document_ids if document_ids is None else document_ids
+            )
+            effective_document_names = (
+                self.document_names if document_names is None else document_names
+            )
+            return effective_document_ids, effective_document_names, None
+
         effective_document_names = (
             self.document_names if document_names is None else document_names
         )
-        return effective_document_ids, effective_document_names
+        if effective_document_names:
+            return (
+                [],
+                [],
+                self._format_scope_rejection(
+                    "document_names are not supported in scoped knowledge base "
+                    "sessions. Use document_ids from kb_ls instead."
+                ),
+            )
+
+        allowed_document_ids = dedupe_document_ids(self.document_ids)
+        if not allowed_document_ids:
+            return (
+                [],
+                [],
+                self._format_scope_rejection(
+                    "No documents are available in the scoped knowledge range "
+                    "for this conversation."
+                ),
+            )
+
+        requested_document_ids = dedupe_document_ids(document_ids or [])
+        if not requested_document_ids:
+            return allowed_document_ids, [], None
+
+        out_of_scope_document_ids = get_out_of_scope_document_ids(
+            requested_document_ids=requested_document_ids,
+            allowed_document_ids=allowed_document_ids,
+        )
+        if out_of_scope_document_ids:
+            return (
+                [],
+                [],
+                self._format_scope_rejection(
+                    requested_document_ids=requested_document_ids,
+                ),
+            )
+
+        return requested_document_ids, [], None
+
+    def _format_scope_rejection(
+        self,
+        message: str = DOCUMENT_SCOPE_OUT_OF_RANGE_MESSAGE,
+        requested_document_ids: Optional[list[int]] = None,
+    ) -> str:
+        """Build a fail-closed scoped access rejection payload."""
+        return format_document_scope_violation(
+            knowledge_base_ids=self.knowledge_base_ids,
+            accessible_document_count=len(dedupe_document_ids(self.document_ids)),
+            message=message,
+            requested_document_ids=requested_document_ids,
+        )
 
     async def _arun(
         self,
@@ -521,10 +585,16 @@ class KnowledgeBaseTool(BaseTool):
         run_manager: CallbackManagerForToolRun | None = None,
     ) -> str:
         """Execute knowledge base search with optional per-call scoped filters."""
-        effective_document_ids, effective_document_names = self._resolve_scoped_filters(
+        (
+            effective_document_ids,
+            effective_document_names,
+            scope_error,
+        ) = self._resolve_scoped_filters(
             document_ids=document_ids,
             document_names=document_names,
         )
+        if scope_error is not None:
+            return scope_error
         return await self._arun_impl(
             query,
             max_results,
@@ -967,6 +1037,8 @@ class KnowledgeBaseTool(BaseTool):
                     query=query,
                     max_results=max_results,
                     route_mode=route_mode,
+                    document_ids=document_ids,
+                    document_names=document_names,
                 )
 
         mode = result.get("mode", InjectionMode.RAG_ONLY)

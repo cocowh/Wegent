@@ -22,6 +22,12 @@ from pydantic import BaseModel, Field, PrivateAttr
 from shared.telemetry.context.large_data import log_large_string_list
 from shared.telemetry.decorators import add_span_event, set_span_attribute, trace_async
 
+from .knowledge_scope import (
+    dedupe_document_ids,
+    format_document_scope_violation,
+    get_out_of_scope_document_ids,
+)
+
 logger = logging.getLogger(__name__)
 
 # Default configuration values
@@ -122,6 +128,27 @@ def _build_backend_post_kwargs(data: dict[str, Any], auth_token: str = "") -> di
     return kwargs
 
 
+def _empty_kb_ls_response(
+    *,
+    knowledge_base_id: int,
+    offset: int,
+    limit: int,
+) -> str:
+    """Build an empty kb_ls response for empty scoped document sets."""
+    return json.dumps(
+        {
+            "knowledge_base_id": knowledge_base_id,
+            "documents": [],
+            "total": 0,
+            "returned_count": 0,
+            "offset": offset,
+            "limit": limit,
+            "has_more": False,
+        },
+        ensure_ascii=False,
+    )
+
+
 # ============== kb_ls Tool ==============
 
 
@@ -163,6 +190,10 @@ class KbLsTool(BaseTool):
 
     # Knowledge base IDs this tool can access (set when creating the tool)
     knowledge_base_ids: list[int] = Field(default_factory=list)
+
+    # Scoped document IDs this tool can list when scope_restricted is true
+    document_ids: list[int] = Field(default_factory=list)
+    scope_restricted: bool = False
 
     # Database session (optional, used in package mode)
     db_session: Optional[Any] = None
@@ -206,12 +237,6 @@ class KbLsTool(BaseTool):
             set_span_attribute("offset", offset)
             set_span_attribute("limit", limit)
 
-            # Check call limit if counter is set
-            if self._call_counter:
-                allowed, error_msg = self._call_counter.check_and_increment()
-                if not allowed:
-                    return error_msg
-
             # Validate knowledge base ID is in allowed list
             if (
                 self.knowledge_base_ids
@@ -237,6 +262,20 @@ class KbLsTool(BaseTool):
                     {"error": "offset must be greater than or equal to 0"},
                     ensure_ascii=False,
                 )
+
+            scoped_document_ids = dedupe_document_ids(self.document_ids)
+            if self.scope_restricted and not scoped_document_ids:
+                return _empty_kb_ls_response(
+                    knowledge_base_id=knowledge_base_id,
+                    offset=offset,
+                    limit=limit,
+                )
+
+            # Check call limit after validating scope and request shape.
+            if self._call_counter:
+                allowed, error_msg = self._call_counter.check_and_increment()
+                if not allowed:
+                    return error_msg
 
             logger.info(f"[KbLsTool] Listing documents in KB {knowledge_base_id}")
 
@@ -287,6 +326,10 @@ class KbLsTool(BaseTool):
             base_query = self.db_session.query(KnowledgeDocument).filter(
                 KnowledgeDocument.kind_id == knowledge_base_id
             )
+            if self.scope_restricted:
+                base_query = base_query.filter(
+                    KnowledgeDocument.id.in_(dedupe_document_ids(self.document_ids))
+                )
             total = base_query.count()
             documents = (
                 base_query.order_by(KnowledgeDocument.created_at.desc())
@@ -358,14 +401,19 @@ class KbLsTool(BaseTool):
             add_span_event("http_request_started")
 
             async with httpx.AsyncClient(timeout=30.0) as client:
+                request_data = {
+                    "knowledge_base_id": knowledge_base_id,
+                    "offset": offset,
+                    "limit": limit,
+                }
+                if self.scope_restricted:
+                    request_data["document_ids"] = dedupe_document_ids(
+                        self.document_ids
+                    )
                 response = await client.post(
                     f"{backend_url}/api/internal/rag/list-docs",
                     **_build_backend_post_kwargs(
-                        {
-                            "knowledge_base_id": knowledge_base_id,
-                            "offset": offset,
-                            "limit": limit,
-                        },
+                        request_data,
                         self.auth_token,
                     ),
                 )
@@ -461,6 +509,10 @@ class KbHeadTool(BaseTool):
     # Knowledge base IDs this tool can access (set when creating the tool)
     knowledge_base_ids: list[int] = Field(default_factory=list)
 
+    # Scoped document IDs this tool can read when scope_restricted is true
+    document_ids: list[int] = Field(default_factory=list)
+    scope_restricted: bool = False
+
     # User ID for context creation when auto-creating records
     user_id: int = 0
 
@@ -511,12 +563,6 @@ class KbHeadTool(BaseTool):
             set_span_attribute("offset", offset)
             set_span_attribute("limit", limit)
 
-            # Check call limit if counter is set
-            if self._call_counter:
-                allowed, error_msg = self._call_counter.check_and_increment()
-                if not allowed:
-                    return error_msg
-
             if not document_ids:
                 return json.dumps(
                     {"error": "No document IDs provided"}, ensure_ascii=False
@@ -527,22 +573,58 @@ class KbHeadTool(BaseTool):
                     ensure_ascii=False,
                 )
 
+            normalized_document_ids = dedupe_document_ids(document_ids)
+            scope_error = self._validate_scoped_document_access(normalized_document_ids)
+            if scope_error is not None:
+                return scope_error
+
+            # Check call limit after validating scope and request shape.
+            if self._call_counter:
+                allowed, error_msg = self._call_counter.check_and_increment()
+                if not allowed:
+                    return error_msg
+
             logger.info(
-                f"[KbHeadTool] Reading {len(document_ids)} documents, offset={offset}, limit={limit}"
+                f"[KbHeadTool] Reading {len(normalized_document_ids)} documents, offset={offset}, limit={limit}"
             )
 
             # Try package mode first (direct DB access)
             try:
-                return await self._read_docs_package_mode(document_ids, offset, limit)
+                return await self._read_docs_package_mode(
+                    normalized_document_ids, offset, limit
+                )
             except ImportError:
                 # Fall back to HTTP mode
-                return await self._read_docs_http_mode(document_ids, offset, limit)
+                return await self._read_docs_http_mode(
+                    normalized_document_ids, offset, limit
+                )
 
         except Exception as e:
             logger.error(f"[KbHeadTool] Failed to read documents: {e}", exc_info=True)
             return json.dumps(
                 {"error": f"Failed to read documents: {str(e)}"}, ensure_ascii=False
             )
+
+    def _validate_scoped_document_access(
+        self,
+        requested_document_ids: list[int],
+    ) -> Optional[str]:
+        """Return an error payload when requested docs exceed the scoped allowlist."""
+        if not self.scope_restricted:
+            return None
+
+        allowed_document_ids = dedupe_document_ids(self.document_ids)
+        out_of_scope_document_ids = get_out_of_scope_document_ids(
+            requested_document_ids=requested_document_ids,
+            allowed_document_ids=allowed_document_ids,
+        )
+        if not allowed_document_ids or out_of_scope_document_ids:
+            return format_document_scope_violation(
+                knowledge_base_ids=self.knowledge_base_ids,
+                accessible_document_count=len(allowed_document_ids),
+                requested_document_ids=requested_document_ids,
+            )
+        return None
 
     @trace_async(
         span_name="kb_head_read_docs_package_mode",

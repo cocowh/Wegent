@@ -2,9 +2,11 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
+from datetime import datetime, timedelta
 from unittest.mock import ANY, AsyncMock, patch
 
 from app.core.config import settings
+from app.models.knowledge import KnowledgeDocument
 from app.services.rag.remote_gateway import RemoteRagGatewayError
 from app.services.rag.runtime_specs import (
     DirectInjectionBudget,
@@ -62,6 +64,65 @@ def _make_runtime_spec(
             DirectInjectionBudget(context_window=10000) if with_budget else None
         ),
     )
+
+
+def test_internal_list_docs_filters_by_document_ids_and_kb(test_client, test_db):
+    now = datetime.utcnow()
+    allowed_doc = KnowledgeDocument(
+        kind_id=7,
+        attachment_id=0,
+        name="allowed.md",
+        file_extension="md",
+        file_size=128,
+        user_id=1,
+        is_active=True,
+        created_at=now,
+        updated_at=now,
+    )
+    blocked_doc = KnowledgeDocument(
+        kind_id=7,
+        attachment_id=0,
+        name="blocked.md",
+        file_extension="md",
+        file_size=128,
+        user_id=1,
+        is_active=True,
+        created_at=now - timedelta(seconds=1),
+        updated_at=now - timedelta(seconds=1),
+    )
+    other_kb_doc = KnowledgeDocument(
+        kind_id=8,
+        attachment_id=0,
+        name="other-kb.md",
+        file_extension="md",
+        file_size=128,
+        user_id=1,
+        is_active=True,
+        created_at=now - timedelta(seconds=2),
+        updated_at=now - timedelta(seconds=2),
+    )
+    test_db.add_all([allowed_doc, blocked_doc, other_kb_doc])
+    test_db.commit()
+    test_db.refresh(allowed_doc)
+    test_db.refresh(other_kb_doc)
+
+    response = test_client.post(
+        "/api/internal/rag/list-docs",
+        json={
+            "knowledge_base_id": 7,
+            "document_ids": [allowed_doc.id, other_kb_doc.id],
+            "offset": 0,
+            "limit": 20,
+        },
+        headers=_internal_headers(),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 1
+    assert body["returned_count"] == 1
+    assert body["documents"][0]["id"] == allowed_doc.id
+    assert body["documents"][0]["name"] == "allowed.md"
 
 
 def test_internal_retrieve_returns_restricted_safe_summary(test_client):

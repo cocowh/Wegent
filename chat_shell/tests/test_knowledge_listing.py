@@ -7,7 +7,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from chat_shell.tools.builtin.knowledge_listing import KbHeadTool, KbLsTool
+from chat_shell.tools.builtin.knowledge_listing import (
+    KbHeadTool,
+    KbLsTool,
+    KBToolCallCounter,
+)
 
 
 class TestKbLsTool:
@@ -62,6 +66,80 @@ class TestKbLsTool:
         assert data["limit"] == 1
         assert data["has_more"] is True
         assert data["documents"][0]["id"] == 101
+
+    @pytest.mark.asyncio
+    async def test_http_mode_sends_scoped_document_ids(self) -> None:
+        """Scoped listing should ask Backend to list only the allowed documents."""
+        tool = KbLsTool(
+            knowledge_base_ids=[3],
+            document_ids=[101, 102],
+            scope_restricted=True,
+        )
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "documents": [
+                {
+                    "id": 101,
+                    "name": "doc-101",
+                    "file_extension": "md",
+                    "file_size": 2048,
+                    "short_summary": "summary",
+                    "is_active": True,
+                }
+            ],
+            "total": 2,
+            "returned_count": 1,
+            "offset": 0,
+            "limit": 1,
+            "has_more": True,
+        }
+
+        with (
+            patch(
+                "chat_shell.tools.builtin.knowledge_listing._get_backend_url",
+                return_value="http://backend",
+            ),
+            patch("httpx.AsyncClient") as mock_client,
+        ):
+            post = AsyncMock(return_value=mock_response)
+            mock_client.return_value.__aenter__.return_value.post = post
+
+            result = await tool._arun(knowledge_base_id=3, offset=0, limit=1)
+
+        post.assert_awaited_once()
+        assert post.call_args.kwargs["json"] == {
+            "knowledge_base_id": 3,
+            "offset": 0,
+            "limit": 1,
+            "document_ids": [101, 102],
+        }
+        data = json.loads(result)
+        assert data["total"] == 2
+        assert data["documents"][0]["id"] == 101
+
+    @pytest.mark.asyncio
+    async def test_scoped_empty_document_set_returns_empty_listing(self) -> None:
+        """Empty scoped listing should not fall back to full KB listing."""
+        tool = KbLsTool(
+            knowledge_base_ids=[3],
+            document_ids=[],
+            scope_restricted=True,
+        )
+
+        with patch("httpx.AsyncClient") as mock_client:
+            result = await tool._arun(knowledge_base_id=3, offset=0, limit=20)
+
+        mock_client.assert_not_called()
+        assert json.loads(result) == {
+            "knowledge_base_id": 3,
+            "documents": [],
+            "total": 0,
+            "returned_count": 0,
+            "offset": 0,
+            "limit": 20,
+            "has_more": False,
+        }
 
 
 class TestKbHeadTool:
@@ -172,3 +250,56 @@ class TestKbHeadTool:
         assert json.loads(result) == {
             "error": "No accessible knowledge bases configured"
         }
+
+    @pytest.mark.asyncio
+    async def test_arun_scoped_rejects_out_of_scope_documents_before_counter(
+        self,
+    ) -> None:
+        """Scoped reads should reject any out-of-scope document ID as a hard error."""
+        tool = KbHeadTool(
+            knowledge_base_ids=[3],
+            document_ids=[101],
+            scope_restricted=True,
+            user_id=7,
+            user_subtask_id=8,
+        )
+        counter = KBToolCallCounter(max_calls=1)
+        tool._call_counter = counter
+
+        result = await tool._arun(document_ids=[101, 999], offset=0, limit=20)
+
+        data = json.loads(result)
+        assert data["status"] == "error"
+        assert data["error_code"] == "document_scope_violation"
+        assert data["requested_document_ids"] == [101, 999]
+        assert counter.call_count == 0
+
+    @pytest.mark.asyncio
+    async def test_http_mode_allows_scoped_document_subset(self) -> None:
+        """Scoped reads should send valid document subsets to Backend unchanged."""
+        tool = KbHeadTool(
+            knowledge_base_ids=[3],
+            document_ids=[101, 102],
+            scope_restricted=True,
+            user_id=7,
+            user_subtask_id=8,
+        )
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"documents": [], "total": 0}
+
+        with (
+            patch(
+                "chat_shell.tools.builtin.knowledge_listing._get_backend_url",
+                return_value="http://backend",
+            ),
+            patch("httpx.AsyncClient") as mock_client,
+        ):
+            post = AsyncMock(return_value=mock_response)
+            mock_client.return_value.__aenter__.return_value.post = post
+
+            await tool._arun(document_ids=[102], offset=0, limit=50)
+
+        post.assert_awaited_once()
+        assert post.call_args.kwargs["json"]["document_ids"] == [102]
+        assert post.call_args.kwargs["json"]["knowledge_base_ids"] == [3]

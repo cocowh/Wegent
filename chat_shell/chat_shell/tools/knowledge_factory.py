@@ -125,6 +125,7 @@ async def prepare_knowledge_base_tools(
         context_window=context_window,
         injection_mode="hybrid",
         tool_access_mode=kb_tool_access_mode,
+        scope_restricted=scope_restricted,
     )
     extra_tools.append(kb_tool)
 
@@ -149,6 +150,8 @@ async def prepare_knowledge_base_tools(
         # They share a call counter to enforce combined call limits
         kb_ls_tool = KbLsTool(
             knowledge_base_ids=knowledge_base_ids,
+            document_ids=document_ids or [],
+            scope_restricted=scope_restricted,
             db_session=db,
             auth_token=auth_token,
         )
@@ -156,6 +159,8 @@ async def prepare_knowledge_base_tools(
 
         kb_head_tool = KbHeadTool(
             knowledge_base_ids=knowledge_base_ids,
+            document_ids=document_ids or [],
+            scope_restricted=scope_restricted,
             user_id=user_id,
             db_session=db,
             user_subtask_id=user_subtask_id,

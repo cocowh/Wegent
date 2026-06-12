@@ -1402,6 +1402,7 @@ def _prepare_kb_tools_from_contexts(
         or "default",
         injection_mode="hybrid",
         tool_access_mode=kb_tool_access_mode,
+        scope_restricted=scope_restricted,
     )
     extra_tools.append(kb_tool)
 

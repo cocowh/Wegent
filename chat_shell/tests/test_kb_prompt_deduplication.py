@@ -297,6 +297,32 @@ class TestKnowledgeFactoryDynamicContext:
             assert "## Knowledge Base Available" not in result.enhanced_system_prompt
 
     @pytest.mark.asyncio
+    async def test_prepare_kb_tools_passes_scoped_documents_to_all_tools(self):
+        """Scoped document allowlists should be enforced by every KB tool."""
+        from chat_shell.tools.knowledge_factory import prepare_knowledge_base_tools
+
+        result = await prepare_knowledge_base_tools(
+            knowledge_base_ids=[1],
+            user_id=1,
+            db=MagicMock(),
+            base_system_prompt="Base",
+            document_ids=[101, 102],
+            scope_restricted=True,
+            model_id="claude-3-5-sonnet",
+            skip_prompt_enhancement=True,
+        )
+
+        tools_by_name = {tool.name: tool for tool in result.extra_tools}
+        assert set(tools_by_name) == {
+            "knowledge_base_search",
+            "kb_ls",
+            "kb_head",
+        }
+        for tool in tools_by_name.values():
+            assert tool.document_ids == [101, 102]
+            assert tool.scope_restricted is True
+
+    @pytest.mark.asyncio
     async def test_no_skip_prompt_enhancement_adds_kb_prompt(self):
         """When skip_prompt_enhancement=False, should add KB prompt."""
         from chat_shell.tools.knowledge_factory import prepare_knowledge_base_tools
