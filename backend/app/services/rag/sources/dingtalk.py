@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -49,6 +50,18 @@ CONTENT_TYPE_ALIASES = {"alidoc": "adoc"}
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class _PreparedRef:
+    """Locally authorized DingTalk ref ready for runtime retrieval."""
+
+    ref: Any
+    source_id: str
+    source_name: str | None
+    canonical_ref_key: str
+    allowed_node_ids: set[str]
+    readable_node_ids: set[str]
+
+
 class DingTalkRetrievalSourceProvider:
     """DingTalk provider backed by the synced-node catalog as an allowlist."""
 
@@ -82,6 +95,7 @@ class DingTalkRetrievalSourceProvider:
                     ignored_source_ids.append(source_id)
                 warnings.append("Current user was not found")
             else:
+                prepared_refs: list[_PreparedRef] = []
                 for ref in refs:
                     source_id = ref.id or DOCS_CONTAINER_ID
                     source_name = _ref_name(ref)
@@ -93,69 +107,81 @@ class DingTalkRetrievalSourceProvider:
                         )
                         warnings.append(_missing_catalog_warning(ref))
                         continue
-
-                    mcp_url = DingTalkDocService.get_user_dingtalk_mcp_url(user)
-                    if not mcp_url:
-                        statuses.append(
-                            _source_status(ref, source_id, source_name, "failed", 0)
-                        )
-                        warnings.append("DingTalk Docs MCP is not configured")
-                        continue
-
-                    try:
-                        allowed_node_ids = _allowed_node_ids(
-                            db, ctx.user_id, ref, nodes
-                        )
-                        source_records, retrieval_warnings = (
-                            await _retrieve_ref_content(
-                                client=DingTalkDocsMcpClient(mcp_url),
-                                query=query,
-                                ref=ref,
-                                source_id=source_id,
-                                source_name=source_name,
-                                allowed_node_ids=allowed_node_ids,
-                                readable_node_ids=_readable_node_ids(
-                                    db,
-                                    ctx.user_id,
-                                    ref,
-                                    allowed_node_ids,
-                                ),
-                            )
-                        )
-                    except DingTalkMcpError as exc:
-                        logger.warning(
-                            "DingTalk Docs MCP retrieval failed for source %s: %s",
-                            source_id,
-                            exc.safe_message,
-                        )
-                        statuses.append(
-                            _source_status(ref, source_id, source_name, "failed", 0)
-                        )
-                        warnings.append(_mcp_warning(exc))
-                        continue
-                    except Exception:
-                        logger.warning(
-                            "Unexpected DingTalk Docs MCP retrieval failure for source %s",
-                            source_id,
-                        )
-                        statuses.append(
-                            _source_status(ref, source_id, source_name, "failed", 0)
-                        )
-                        warnings.append("DingTalk Docs MCP content retrieval failed")
-                        continue
-
-                    searched_source_ids.append(source_id)
-                    records.extend(source_records)
-                    warnings.extend(retrieval_warnings)
-                    statuses.append(
-                        _source_status(
-                            ref,
-                            source_id,
-                            source_name,
-                            "hit" if source_records else "no_hit",
-                            len(source_records),
+                    allowed_node_ids = _allowed_node_ids(db, ctx.user_id, ref, nodes)
+                    prepared_refs.append(
+                        _PreparedRef(
+                            ref=ref,
+                            source_id=source_id,
+                            source_name=source_name,
+                            canonical_ref_key=external_ref_canonical_key(ref),
+                            allowed_node_ids=allowed_node_ids,
+                            readable_node_ids=_readable_node_ids(
+                                db, ctx.user_id, ref, allowed_node_ids
+                            ),
                         )
                     )
+
+                mcp_url = DingTalkDocService.get_user_dingtalk_mcp_url(user)
+                if not mcp_url:
+                    for prepared in prepared_refs:
+                        statuses.append(
+                            _source_status(
+                                prepared.ref,
+                                prepared.source_id,
+                                prepared.source_name,
+                                "failed",
+                                0,
+                            )
+                        )
+                    if prepared_refs:
+                        warnings.append("DingTalk Docs MCP is not configured")
+                else:
+                    client = DingTalkDocsMcpClient(mcp_url)
+                    batch_refs = [
+                        ref for ref in prepared_refs if _is_batchable_wikispace(ref)
+                    ]
+                    batch_outcomes: dict[str, tuple[list[Any], list[str], bool]] = {}
+                    if len(batch_refs) > 1:
+                        try:
+                            batch_outcomes = await _retrieve_wikispace_batch(
+                                client=client, query=query, prepared_refs=batch_refs
+                            )
+                        except DingTalkMcpError:
+                            # A rejected or incomplete batch contract falls back to the
+                            # existing, independently scoped retrieval path.
+                            batch_outcomes = {}
+
+                    for prepared in prepared_refs:
+                        outcome = batch_outcomes.get(prepared.canonical_ref_key)
+                        if outcome is None:
+                            outcome = await _retrieve_single_prepared_ref(
+                                client, query, prepared
+                            )
+                        source_records, retrieval_warnings, failed = outcome
+                        if failed:
+                            warnings.extend(retrieval_warnings)
+                            statuses.append(
+                                _source_status(
+                                    prepared.ref,
+                                    prepared.source_id,
+                                    prepared.source_name,
+                                    "failed",
+                                    0,
+                                )
+                            )
+                        else:
+                            searched_source_ids.append(prepared.source_id)
+                            records.extend(source_records)
+                            warnings.extend(retrieval_warnings)
+                            statuses.append(
+                                _source_status(
+                                    prepared.ref,
+                                    prepared.source_id,
+                                    prepared.source_name,
+                                    "hit" if source_records else "no_hit",
+                                    len(source_records),
+                                )
+                            )
         finally:
             db.close()
 
@@ -246,6 +272,164 @@ class DingTalkRetrievalSourceProvider:
             return results
         finally:
             db.close()
+
+
+async def _retrieve_single_prepared_ref(
+    client: DingTalkDocsMcpClient,
+    query: str,
+    prepared: _PreparedRef,
+) -> tuple[list[Any], list[str], bool]:
+    """Run the established per-ref flow and convert failures to safe outcomes."""
+    try:
+        records, warnings = await _retrieve_ref_content(
+            client=client,
+            query=query,
+            ref=prepared.ref,
+            source_id=prepared.source_id,
+            source_name=prepared.source_name,
+            allowed_node_ids=prepared.allowed_node_ids,
+            readable_node_ids=prepared.readable_node_ids,
+        )
+        return records, warnings, False
+    except DingTalkMcpError as exc:
+        logger.warning(
+            "DingTalk Docs MCP retrieval failed for source %s: %s",
+            prepared.source_id,
+            exc.safe_message,
+        )
+        return [], [_mcp_warning(exc)], True
+    except Exception:
+        logger.warning(
+            "Unexpected DingTalk Docs MCP retrieval failure for source %s",
+            prepared.source_id,
+        )
+        return [], ["DingTalk Docs MCP content retrieval failed"], True
+
+
+async def _retrieve_wikispace_batch(
+    *,
+    client: DingTalkDocsMcpClient,
+    query: str,
+    prepared_refs: list[_PreparedRef],
+) -> dict[str, tuple[list[Any], list[str], bool]]:
+    """Search complete WikiSpaces together, then keep local scope boundaries."""
+    by_node_id = {
+        node_id: prepared
+        for prepared in prepared_refs
+        for node_id in prepared.readable_node_ids
+    }
+    candidates: dict[str, dict[str, dict[str, Any]]] = {
+        prepared.canonical_ref_key: {} for prepared in prepared_refs
+    }
+    page_token: str | None = None
+    has_more = False
+    for page_number in range(MAX_SEARCH_PAGES):
+        page = await client.search_documents(
+            keyword=query,
+            workspace_ids=[prepared.source_id for prepared in prepared_refs],
+            extensions=sorted(READABLE_CONTENT_TYPES),
+            page_token=page_token,
+            page_size=MAX_SEARCH_CANDIDATES,
+        )
+        has_more = page.has_more
+        for document in page.documents:
+            node_id = _record_node_id(document)
+            if node_id is None:
+                raise DingTalkMcpError(
+                    "invalid_response",
+                    "DingTalk Docs MCP search returned a document without node ID",
+                )
+            prepared = by_node_id.get(node_id)
+            if (
+                prepared is None
+                or node_id not in prepared.allowed_node_ids
+                or not _record_is_readable(document)
+            ):
+                continue
+            workspace_id = document.get("workspaceId") or document.get("workspace_id")
+            if workspace_id and str(workspace_id) != prepared.source_id:
+                continue
+            ref_candidates = candidates[prepared.canonical_ref_key]
+            if len(ref_candidates) < MAX_DOCUMENT_CONTENT_REQUESTS:
+                ref_candidates[node_id] = document
+        if not has_more:
+            break
+        if page_number == MAX_SEARCH_PAGES - 1:
+            break
+        if not page.next_page_token:
+            raise DingTalkMcpError(
+                "capability_limitation",
+                "DingTalk Docs MCP search pagination is unavailable",
+            )
+        page_token = page.next_page_token
+
+    fallback_keys = (
+        {
+            prepared.canonical_ref_key
+            for prepared in prepared_refs
+            if not candidates[prepared.canonical_ref_key]
+        }
+        if has_more
+        else set()
+    )
+    outcomes: dict[str, tuple[list[Any], list[str], bool]] = {}
+    for prepared in prepared_refs:
+        key = prepared.canonical_ref_key
+        if key in fallback_keys:
+            continue
+        documents = list(candidates[key].values())
+        if not documents:
+            outcomes[key] = ([], [], False)
+            continue
+        outcomes[key] = await _read_batch_candidates(client, prepared, documents)
+    return outcomes
+
+
+async def _read_batch_candidates(
+    client: DingTalkDocsMcpClient,
+    prepared: _PreparedRef,
+    documents: list[dict[str, Any]],
+) -> tuple[list[Any], list[str], bool]:
+    """Read one ref's deduplicated candidates without losing partial successes."""
+    semaphore = asyncio.Semaphore(MAX_MCP_CONCURRENCY)
+
+    async def read(document: dict[str, Any]) -> Any:
+        node_id = _record_node_id(document)
+        if node_id is None:
+            raise DingTalkMcpError(
+                "invalid_response", "DingTalk Docs MCP returned no node ID"
+            )
+        async with semaphore:
+            content = await client.get_document_content(node_id=node_id)
+        return _map_content_record(
+            content,
+            ref=prepared.ref,
+            source_id=prepared.source_id,
+            source_name=prepared.source_name,
+            score=_record_score(document),
+        )
+
+    results = await asyncio.gather(
+        *(read(document) for document in documents), return_exceptions=True
+    )
+    records = [result for result in results if not isinstance(result, Exception)]
+    if not records:
+        return [], [_mcp_warning(DingTalkMcpError("content_read_failed", ""))], True
+    warnings = (
+        ["Some DingTalk documents could not be retrieved"]
+        if len(records) != len(results)
+        else []
+    )
+    return records, warnings, False
+
+
+def _is_batchable_wikispace(prepared: _PreparedRef) -> bool:
+    """Only complete WikiSpace refs may share a global Docs MCP ranking."""
+    return (
+        _source_for_ref(prepared.ref) == DingTalkNodeSource.WIKISPACE
+        and not _is_document_ref(prepared.ref)
+        and prepared.ref.target_type in {None, "knowledge_base"}
+    )
 
 
 async def _retrieve_ref_content(
