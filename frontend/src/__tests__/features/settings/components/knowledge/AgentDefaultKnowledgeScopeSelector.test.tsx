@@ -111,18 +111,23 @@ jest.mock('@/features/tasks/components/chat/KnowledgeSourcePicker', () => ({
 
 describe('AgentDefaultKnowledgeScopeSelector', () => {
   it('gives the picker the remaining popover height without a second height owner', async () => {
+    const popoverContainer = document.createElement('div')
+    document.body.appendChild(popoverContainer)
+
     render(
       <AgentDefaultKnowledgeScopeSelector
         defaultKnowledgeBaseRefs={[]}
         onDefaultKnowledgeBaseRefsChange={jest.fn()}
         defaultExternalKnowledgeRefs={[]}
         onDefaultExternalKnowledgeRefsChange={jest.fn()}
+        popoverContainer={popoverContainer}
       />
     )
 
     fireEvent.click(screen.getByTestId('agent-default-knowledge-scope-trigger'))
 
     const popover = await screen.findByTestId('agent-default-knowledge-scope-popover')
+    expect(popoverContainer).toContainElement(popover)
     expect(popover).toHaveClass('flex', 'flex-col', 'overflow-hidden')
     expect(popover).toHaveClass('h-[min(556px,var(--radix-popover-content-available-height))]')
     expect(popover.firstElementChild).toHaveClass(
@@ -135,6 +140,25 @@ describe('AgentDefaultKnowledgeScopeSelector', () => {
     expect(screen.getByTestId('mock-knowledge-source-picker')).toHaveAttribute(
       'data-layout',
       'fill-parent'
+    )
+
+    popoverContainer.remove()
+  })
+
+  it('uses the default portal container when no dialog container is supplied', async () => {
+    const { container } = render(
+      <AgentDefaultKnowledgeScopeSelector
+        defaultKnowledgeBaseRefs={[]}
+        onDefaultKnowledgeBaseRefsChange={jest.fn()}
+        defaultExternalKnowledgeRefs={[]}
+        onDefaultExternalKnowledgeRefsChange={jest.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByTestId('agent-default-knowledge-scope-trigger'))
+
+    expect(container).not.toContainElement(
+      await screen.findByTestId('agent-default-knowledge-scope-popover')
     )
   })
 

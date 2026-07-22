@@ -43,6 +43,7 @@ interface AgentDefaultKnowledgeScopeSelectorProps {
   allowedSources?: Array<'personal' | 'group' | 'organization'>
   allowedGroupNamespaces?: string[]
   allowExternalKnowledge?: boolean
+  popoverContainer?: HTMLElement | null
 }
 
 type TranslationFunction = ReturnType<typeof useTranslation>['t']
@@ -213,6 +214,7 @@ export function AgentDefaultKnowledgeScopeSelector({
   allowedSources,
   allowedGroupNamespaces,
   allowExternalKnowledge = true,
+  popoverContainer,
 }: AgentDefaultKnowledgeScopeSelectorProps) {
   const { t } = useTranslation('settings')
   const [open, setOpen] = useState(false)
@@ -341,6 +343,7 @@ export function AgentDefaultKnowledgeScopeSelector({
           side="bottom"
           sideOffset={4}
           collisionPadding={8}
+          container={popoverContainer}
           data-testid="agent-default-knowledge-scope-popover"
         >
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
