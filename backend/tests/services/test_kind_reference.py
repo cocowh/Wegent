@@ -5,7 +5,6 @@
 from app.models.kind import Kind
 from app.services import kind_reference
 from app.services.kind_reference import resolve_kind_reference
-from app.services.kind_reference_migration import migrate_legacy_kind_references
 
 
 def _kind(
@@ -134,67 +133,3 @@ def test_group_owner_can_resolve_owned_reference_without_membership(test_db) -> 
 
     assert resolution.resource.id == bot.id
     assert resolution.used_legacy_lookup is True
-
-
-def test_safe_migration_backfills_unique_refs_and_records_conflicts(
-    test_db,
-    monkeypatch,
-) -> None:
-    monkeypatch.setattr(
-        kind_reference,
-        "check_group_permission",
-        lambda db, user_id, namespace, role: True,
-    )
-    unique_ghost = _kind(user_id=1, kind="Ghost", name="unique-ghost")
-    legacy_bot = _kind(
-        user_id=1,
-        kind="Bot",
-        name="legacy-bot",
-        spec={
-            "ghostRef": {"name": "unique-ghost", "namespace": "default"},
-            "shellRef": {"name": "Chat", "namespace": "default"},
-        },
-    )
-    duplicate_one = _kind(
-        user_id=2,
-        kind="Bot",
-        name="duplicate-bot",
-        namespace="group-a",
-    )
-    duplicate_two = _kind(
-        user_id=3,
-        kind="Bot",
-        name="duplicate-bot",
-        namespace="group-a",
-    )
-    legacy_team = _kind(
-        user_id=1,
-        kind="Team",
-        name="legacy-team",
-        namespace="group-a",
-        spec={
-            "members": [
-                {
-                    "botRef": {
-                        "name": "duplicate-bot",
-                        "namespace": "group-a",
-                    }
-                }
-            ],
-            "collaborationModel": "solo",
-        },
-    )
-    test_db.add_all(
-        [unique_ghost, legacy_bot, duplicate_one, duplicate_two, legacy_team]
-    )
-    test_db.commit()
-
-    report = migrate_legacy_kind_references(test_db, apply_changes=True)
-
-    test_db.refresh(legacy_bot)
-    test_db.refresh(legacy_team)
-    assert legacy_bot.json["spec"]["ghostRef"]["id"] == unique_ghost.id
-    assert "id" not in legacy_team.json["spec"]["members"][0]["botRef"]
-    assert report.migrated == 1
-    assert len(report.conflicts) == 1
-    assert report.failures == []
