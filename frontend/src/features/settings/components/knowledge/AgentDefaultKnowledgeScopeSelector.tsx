@@ -363,6 +363,7 @@ export function AgentDefaultKnowledgeScopeSelector({
               onSelect={handleSelect}
               onDeselect={handleDeselect}
               onReplaceContexts={handleReplaceContexts}
+              layout="fill-parent"
             />
           </div>
         </PopoverContent>

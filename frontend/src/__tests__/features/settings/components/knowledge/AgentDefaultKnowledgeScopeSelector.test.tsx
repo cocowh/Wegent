@@ -56,11 +56,13 @@ jest.mock('@/features/tasks/components/chat/KnowledgeSourcePicker', () => ({
   KnowledgeSourcePicker: ({
     onSelect,
     onReplaceContexts,
+    layout,
   }: {
     onSelect: (context: ContextItem) => void
     onReplaceContexts?: (idsToRemove: (number | string)[], contextsToAdd: ContextItem[]) => void
+    layout?: 'self-contained' | 'fill-parent'
   }) => (
-    <div data-testid="mock-knowledge-source-picker">
+    <div data-layout={layout} data-testid="mock-knowledge-source-picker">
       <button
         type="button"
         onClick={() =>
@@ -108,7 +110,7 @@ jest.mock('@/features/tasks/components/chat/KnowledgeSourcePicker', () => ({
 }))
 
 describe('AgentDefaultKnowledgeScopeSelector', () => {
-  it('uses a bounded flex layout so picker columns can scroll inside the popover', async () => {
+  it('gives the picker the remaining popover height without a second height owner', async () => {
     render(
       <AgentDefaultKnowledgeScopeSelector
         defaultKnowledgeBaseRefs={[]}
@@ -129,6 +131,10 @@ describe('AgentDefaultKnowledgeScopeSelector', () => {
       'flex-1',
       'flex-col',
       'overflow-hidden'
+    )
+    expect(screen.getByTestId('mock-knowledge-source-picker')).toHaveAttribute(
+      'data-layout',
+      'fill-parent'
     )
   })
 
