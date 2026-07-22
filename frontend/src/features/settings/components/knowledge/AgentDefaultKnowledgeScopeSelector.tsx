@@ -334,8 +334,8 @@ export function AgentDefaultKnowledgeScopeSelector({
         </PopoverTrigger>
         <PopoverContent
           className={cn(
-            'p-0 w-[760px] max-w-[calc(100vw-24px)] border border-border bg-base',
-            'max-h-[var(--radix-popover-content-available-height)] overflow-hidden rounded-xl shadow-xl'
+            'flex h-[min(556px,var(--radix-popover-content-available-height))] w-[760px] max-w-[calc(100vw-24px)] flex-col',
+            'overflow-hidden rounded-xl border border-border bg-base p-0 shadow-xl'
           )}
           align="start"
           side="bottom"
@@ -343,7 +343,7 @@ export function AgentDefaultKnowledgeScopeSelector({
           collisionPadding={8}
           data-testid="agent-default-knowledge-scope-popover"
         >
-          <div className="flex min-h-0 flex-col">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
             <Input
               placeholder={t('team.simple.core.default_knowledge_scope.search')}
               value={searchValue}
