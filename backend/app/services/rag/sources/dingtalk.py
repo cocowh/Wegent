@@ -43,6 +43,9 @@ MAX_DOCUMENT_CONTENT_REQUESTS = 10
 MAX_MCP_CONCURRENCY = 3
 MAX_ALLOWLIST_DESCENDANTS = 10_000
 MAX_ALLOWLIST_DEPTH = 100
+# Docs MCP currently returns markdown content only for DingTalk online documents.
+READABLE_CONTENT_TYPES = frozenset({"adoc"})
+CONTENT_TYPE_ALIASES = {"alidoc": "adoc"}
 logger = logging.getLogger(__name__)
 
 
@@ -100,15 +103,24 @@ class DingTalkRetrievalSourceProvider:
                         continue
 
                     try:
-                        source_records = await _retrieve_ref_content(
-                            client=DingTalkDocsMcpClient(mcp_url),
-                            query=query,
-                            ref=ref,
-                            source_id=source_id,
-                            source_name=source_name,
-                            allowed_node_ids=_allowed_node_ids(
-                                db, ctx.user_id, ref, nodes
-                            ),
+                        allowed_node_ids = _allowed_node_ids(
+                            db, ctx.user_id, ref, nodes
+                        )
+                        source_records, retrieval_warnings = (
+                            await _retrieve_ref_content(
+                                client=DingTalkDocsMcpClient(mcp_url),
+                                query=query,
+                                ref=ref,
+                                source_id=source_id,
+                                source_name=source_name,
+                                allowed_node_ids=allowed_node_ids,
+                                readable_node_ids=_readable_node_ids(
+                                    db,
+                                    ctx.user_id,
+                                    ref,
+                                    allowed_node_ids,
+                                ),
+                            )
                         )
                     except DingTalkMcpError as exc:
                         logger.warning(
@@ -134,6 +146,7 @@ class DingTalkRetrievalSourceProvider:
 
                     searched_source_ids.append(source_id)
                     records.extend(source_records)
+                    warnings.extend(retrieval_warnings)
                     statuses.append(
                         _source_status(
                             ref,
@@ -243,12 +256,17 @@ async def _retrieve_ref_content(
     source_id: str,
     source_name: str | None,
     allowed_node_ids: set[str],
-) -> list[Any]:
+    readable_node_ids: set[str],
+) -> tuple[list[Any], list[str]]:
     """Resolve one ref using direct reads or bounded metadata search."""
     if _is_document_ref(ref):
         node_id = ref.document_id or ref.node_id
-        if not node_id or node_id not in allowed_node_ids:
-            return []
+        if (
+            not node_id
+            or node_id not in allowed_node_ids
+            or node_id not in readable_node_ids
+        ):
+            return [], []
         content = await client.get_document_content(node_id=node_id)
         return [
             _map_content_record(
@@ -257,7 +275,7 @@ async def _retrieve_ref_content(
                 source_id=source_id,
                 source_name=source_name,
             )
-        ]
+        ], []
 
     workspace_ids = (
         [source_id] if _source_for_ref(ref) == DingTalkNodeSource.WIKISPACE else None
@@ -268,6 +286,7 @@ async def _retrieve_ref_content(
         search_page = await client.search_documents(
             keyword=query,
             workspace_ids=workspace_ids,
+            extensions=sorted(READABLE_CONTENT_TYPES),
             page_token=page_token,
             page_size=MAX_SEARCH_CANDIDATES,
         )
@@ -280,7 +299,11 @@ async def _retrieve_ref_content(
                     "invalid_response",
                     "DingTalk Docs MCP search returned a document without node ID",
                 )
-            if node_id in allowed_node_ids:
+            if (
+                node_id in allowed_node_ids
+                and node_id in readable_node_ids
+                and _record_is_readable(document)
+            ):
                 candidates.append(document)
         candidates = candidates[:MAX_DOCUMENT_CONTENT_REQUESTS]
         if candidates or not search_page.has_more:
@@ -297,7 +320,7 @@ async def _retrieve_ref_content(
             )
         page_token = search_page.next_page_token
     if not candidates:
-        return []
+        return [], []
 
     semaphore = asyncio.Semaphore(MAX_MCP_CONCURRENCY)
 
@@ -318,7 +341,20 @@ async def _retrieve_ref_content(
             score=_record_score(document),
         )
 
-    return list(await asyncio.gather(*(read_candidate(item) for item in candidates)))
+    results = await asyncio.gather(
+        *(read_candidate(item) for item in candidates), return_exceptions=True
+    )
+    records = [result for result in results if not isinstance(result, Exception)]
+    if not records:
+        raise DingTalkMcpError(
+            "content_read_failed", "DingTalk Docs MCP could not read matching documents"
+        )
+    warnings = (
+        ["Some DingTalk documents could not be retrieved"]
+        if len(records) != len(results)
+        else []
+    )
+    return records, warnings
 
 
 def _source_for_ref(ref) -> DingTalkNodeSource:
@@ -465,6 +501,48 @@ def _record_is_folder(record: dict[str, Any]) -> bool:
         record.get("contentType"),
     )
     return any(str(value).lower() == "folder" for value in values if value)
+
+
+def _record_is_readable(record: dict[str, Any]) -> bool:
+    """Verify Docs MCP did not return an unsupported document type."""
+    for key in ("extension", "fileExtension", "file_extension"):
+        value = record.get(key)
+        if isinstance(value, str) and value.strip():
+            return _normalized_content_type(value) in READABLE_CONTENT_TYPES
+    return False
+
+
+def _readable_node_ids(
+    db: Session,
+    user_id: int,
+    ref,
+    allowed_node_ids: set[str],
+) -> set[str]:
+    """Return allowlisted catalog nodes whose type Docs MCP can read."""
+    if not allowed_node_ids:
+        return set()
+    source = _source_for_ref(ref)
+    query = db.query(
+        DingtalkSyncedNode.dingtalk_node_id, DingtalkSyncedNode.content_type
+    ).filter(
+        DingtalkSyncedNode.user_id == user_id,
+        DingtalkSyncedNode.source == source.value,
+        DingtalkSyncedNode.is_active == True,  # noqa: E712
+        DingtalkSyncedNode.dingtalk_node_id.in_(allowed_node_ids),
+    )
+    if source == DingTalkNodeSource.WIKISPACE:
+        query = query.filter(DingtalkSyncedNode.workspace_id == (ref.id or ""))
+    return {
+        node_id
+        for node_id, content_type in query.all()
+        if _normalized_content_type(content_type) in READABLE_CONTENT_TYPES
+    }
+
+
+def _normalized_content_type(value: object) -> str:
+    """Normalize catalog content-type aliases to the Docs MCP extension."""
+    normalized = str(value or "").strip().lower().removeprefix(".")
+    return CONTENT_TYPE_ALIASES.get(normalized, normalized)
 
 
 def _record_score(record: dict[str, Any]) -> float | None:
