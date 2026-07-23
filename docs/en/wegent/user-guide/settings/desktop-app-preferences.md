@@ -32,6 +32,10 @@ When **Show main window on launch** is enabled, Wework opens the main window whe
 
 When the main window is not visible, click the system tray icon to reopen it.
 
+## Tray Display
+
+**Settings → General → Tray display** controls unread completions, running tasks, and Codex quota independently. When **Codex quota** is enabled, the 5-hour and 7-day remaining quota appears next to the tray icon only when local Codex is available and its quota was read successfully. Wework does not show empty quota placeholders when Codex is unavailable. The tray tooltip and settings menu identify the data as Codex quota.
+
 ## Import from Other AI Apps
 
 **Settings → General → Import work from other AI apps** imports compatible content from other local coding apps into Wework's separate Codex home. Importing replaces files with the same name in the destination, but does not remove content from the source app.
@@ -50,6 +54,14 @@ The first time you close the main window, Wework explains that tasks can continu
 When Wework moves to the background, it destroys the main window WebView to release resources used by the UI. The task executor is not stopped. Reopening from the tray creates a new main window and restores the current task state.
 
 When no conversation is open, the newly created main window keeps the task launcher within the window bounds. The message area scrolls as needed only after a conversation is opened.
+
+## Prevent Sleep While Tasks Are Running
+
+**Prevent sleep while tasks are running** is enabled by default. While at least one task is running, Wework prevents the computer from entering idle system sleep. This inhibition remains active when the main window is closed and Wework continues from the system tray.
+
+After every task completes, fails, or is interrupted, Wework immediately releases the inhibition and restores the operating system's normal sleep policy. Wework does not force the computer to sleep and does not change the configured system sleep timeout.
+
+To keep Wework from controlling sleep, disable this option under **Settings → General**. Disabling it immediately releases any current sleep inhibition. If it is enabled again while a task is still running, Wework resumes preventing idle sleep.
 
 ## Appshots
 

@@ -815,13 +815,67 @@ describe('ScrollableMessageArea', () => {
     rerender(<ScrollableMessageArea conversationKey="conversation-a" messages={[messageA]} />)
 
     act(() => {
-      vi.runOnlyPendingTimers()
+      vi.advanceTimersByTime(0)
     })
+    scroller.scrollTop = 37
+    fireEvent.scroll(scroller)
+    flushScheduledTimers()
 
     expect(scroller.scrollTo).toHaveBeenLastCalledWith({
       top: 180.5,
       behavior: 'auto',
     })
+  })
+
+  test('restores a streaming conversation to its latest bottom after switching back', () => {
+    const streamingMessage = {
+      id: 'streaming-a',
+      role: 'assistant' as const,
+      content: '正在处理',
+      status: 'streaming' as const,
+      createdAt: '2026-05-29T00:00:00.000Z',
+    }
+    const messageB = {
+      id: 'done-b',
+      role: 'assistant' as const,
+      content: '会话 B',
+      status: 'done' as const,
+      createdAt: '2026-05-29T00:00:00.000Z',
+    }
+    const { rerender } = render(
+      <ScrollableMessageArea conversationKey="streaming-switch-a" messages={[streamingMessage]} />
+    )
+
+    const scroller = screen.getByTestId('chat-message-scroll-area')
+    Object.defineProperty(scroller, 'clientHeight', { value: 200, configurable: true })
+    Object.defineProperty(scroller, 'scrollHeight', { value: 600, configurable: true })
+    Object.defineProperty(scroller, 'scrollTop', {
+      value: 400,
+      writable: true,
+      configurable: true,
+    })
+    scroller.scrollTo = vi.fn(({ top }: ScrollToOptions) => {
+      scroller.scrollTop = Number(top)
+    })
+
+    fireEvent.scroll(scroller)
+    rerender(<ScrollableMessageArea conversationKey="streaming-switch-b" messages={[messageB]} />)
+    Object.defineProperty(scroller, 'scrollHeight', { value: 900, configurable: true })
+    ;(scroller.scrollTo as ReturnType<typeof vi.fn>).mockClear()
+
+    rerender(
+      <ScrollableMessageArea
+        conversationKey="streaming-switch-a"
+        messages={[{ ...streamingMessage, content: '正在处理\n\n更多后台流式内容' }]}
+      />
+    )
+    flushScheduledTimers()
+
+    expect(scroller.scrollTo).toHaveBeenLastCalledWith({
+      top: 700,
+      behavior: 'auto',
+    })
+    expect(screen.queryByTestId('scroll-to-bottom-button')).not.toBeInTheDocument()
   })
 
   test('unmounts previously selected conversation DOM while preserving switch-back rendering', () => {
@@ -1268,7 +1322,7 @@ describe('ScrollableMessageArea', () => {
       createdAt: '2026-05-29T00:00:00.000Z',
     }
     const { rerender } = render(
-      <ScrollableMessageArea conversationKey={1} messages={[streamingMessage]} />
+      <ScrollableMessageArea conversationKey="pinned-stream" messages={[streamingMessage]} />
     )
 
     const scroller = screen.getByTestId('chat-message-scroll-area')
@@ -1295,7 +1349,7 @@ describe('ScrollableMessageArea', () => {
 
     rerender(
       <ScrollableMessageArea
-        conversationKey={1}
+        conversationKey="pinned-stream"
         messages={[
           {
             ...streamingMessage,

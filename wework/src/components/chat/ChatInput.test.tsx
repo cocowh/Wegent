@@ -13,7 +13,10 @@ import type { GuidanceWorkbenchMessage, QueuedWorkbenchMessage } from '@/types/w
 
 vi.mock('@/hooks/useTranslation', () => ({
   useTranslation: () => ({
-    t: (key: string, options?: string | { action?: string; count?: number; device?: string }) => {
+    t: (
+      key: string,
+      options?: string | { action?: string; count?: number; device?: string; location?: string }
+    ) => {
       if (typeof options === 'string') return options
       if (key === 'workbench.code_comment_count') {
         return `${options?.count ?? 0} 个评论`
@@ -21,6 +24,8 @@ vi.mock('@/hooks/useTranslation', () => ({
       if (key === 'workbench.project_work_trigger_device_aria') {
         return `${options?.action ?? ''}，当前设备 ${options?.device ?? ''}`
       }
+      if (key === 'workbench.environment_cloud_device') return '云设备'
+      if (key === 'workbench.environment_local') return '本机'
       if (key === 'workbench.remove_code_comments') {
         return '移除代码评论'
       }
@@ -1057,6 +1062,30 @@ describe('ChatInput', () => {
     })
 
     expect(handleFileSelect).toHaveBeenCalledWith([documentFile])
+  })
+
+  test('highlights the desktop composer while files are dragged over it', () => {
+    render(
+      <ChatInput
+        value=""
+        onChange={vi.fn()}
+        onSubmit={vi.fn()}
+        disabled={false}
+        variant="desktop"
+      />
+    )
+
+    const composer = screen.getByTestId('project-chat-composer-form')
+    const dataTransfer = { types: ['Files'], dropEffect: 'none' }
+
+    fireEvent.dragEnter(composer, { dataTransfer })
+
+    expect(composer).toHaveClass('border-focus', 'ring-2', 'ring-focus/20')
+    expect(dataTransfer.dropEffect).toBe('copy')
+
+    fireEvent.dragLeave(composer, { dataTransfer, relatedTarget: document.body })
+
+    expect(composer).toHaveClass('border-border/45')
   })
 
   test('uploads pasted images from the fullscreen compact textbox', async () => {
@@ -2245,7 +2274,7 @@ describe('ChatInput', () => {
     expect(menu.queryByText('计划模式')).not.toBeInTheDocument()
   })
 
-  test('flattens model families while keeping controls from the selected GPT model', async () => {
+  test('nests models by family while keeping controls from the selected GPT model', async () => {
     const gptModel: UnifiedModel = {
       name: 'overseas-gpt-5.5',
       type: 'user',
@@ -2290,8 +2319,13 @@ describe('ChatInput', () => {
     await userEvent.click(screen.getByTestId('model-selector-button'))
     await userEvent.hover(screen.getByTestId('model-control-menu-model'))
 
-    expect(screen.getByTestId('model-option-claude-opus')).toBeInTheDocument()
+    expect(screen.getByTestId('model-family-claude')).toBeInTheDocument()
+    expect(screen.getByTestId('model-family-gpt')).toBeInTheDocument()
+    expect(screen.queryByTestId('model-option-claude-opus')).not.toBeInTheDocument()
+
+    await userEvent.hover(screen.getByTestId('model-family-gpt'))
     expect(screen.getByTestId('model-option-overseas-gpt-5.5')).toBeInTheDocument()
+    expect(screen.queryByTestId('model-option-claude-opus')).not.toBeInTheDocument()
     await userEvent.hover(screen.getByTestId('model-control-menu-reasoning'))
     expect(screen.getByTestId('model-control-reasoning-high')).toBeInTheDocument()
     expect(screen.queryByTestId('model-control-reasoning-auto')).not.toBeInTheDocument()

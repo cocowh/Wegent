@@ -21,6 +21,7 @@ from app.core.config import settings
 from app.models.kind import Kind
 from app.schemas.kind import Bot, Model
 from app.services.kind_reference import resolve_kind_reference
+from app.services.model_capabilities import normalize_model_capabilities
 from app.services.runtime_codex_model import get_enabled_codex_runtime_model_spec
 from shared.models.execution import ExecutionRequest
 from shared.utils.crypto import decrypt_api_key
@@ -959,7 +960,10 @@ def _extract_model_config(model_spec: Dict[str, Any]) -> Dict[str, Any]:
 
     # Video generation config (when modelType='video')
     video_config = model_spec.get("videoConfig")
-    model_capabilities = model_spec.get("modelCapabilities") or None
+    raw_model_capabilities = model_spec.get("modelCapabilities")
+    if raw_model_capabilities is None:
+        raw_model_capabilities = model_config.get("modelCapabilities")
+    model_capabilities = normalize_model_capabilities(raw_model_capabilities)
     if model_capabilities:
         logger.info(
             f"[model_resolver] _extract_model_config: modelCapabilities={model_capabilities}"

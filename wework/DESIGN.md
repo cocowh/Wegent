@@ -151,7 +151,8 @@ from `8px` through `24px`, in whole-pixel steps. Changing UI size scales every
 UI and heading token by `configuredSize / 14` and rounds each result to the
 nearest pixel. Code size is independent and applies directly to code blocks,
 diffs, editors, and terminals. The increase/decrease-font-size shortcuts step
-both configured values together while respecting their separate limits.
+both configured values together while respecting their separate limits. The
+reset-font-size shortcut restores the default `14px` UI and `12px` code sizes.
 
 Product code must consume the semantic Tailwind sizes, `heading-*` classes,
 `text-chat`, `text-code`, or the corresponding CSS variables. Arbitrary font
@@ -550,6 +551,15 @@ Menu items use `14px` text, an `8px` radius, `8px–10px` horizontal padding,
 `4px` vertical padding, a `6px` icon gap, and a neutral hover/focus surface.
 Icons default to `16px` at `75%` opacity and become fully visible on hover or
 focus. Disabled items use `50%` opacity and do not activate.
+
+In the narrow environment popover, workspace and executor metadata form one
+compact two-line item. Lead with a folder icon and the recognizable workspace
+directory name. For local execution, show the executor name beside a laptop
+icon; for cloud execution, show the device IP beside a cloud icon. Keep
+execution-location and field labels available to assistive
+technology and tooltips instead of repeating them visually. Keep the complete
+workspace path available through the tooltip, accessible name, and copy action;
+copy feedback must not change the row's geometry.
 
 Use a menu for commands, a popover for a compact interactive surface, and a
 dialog when a decision blocks continuation. Do not substitute one merely to get

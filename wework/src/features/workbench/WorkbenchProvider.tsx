@@ -18,6 +18,8 @@ import {
 import { requestNewChatComposerFocus } from '@/lib/workbenchComposerFocus'
 import { installLocalWorkspaceOpenListener } from '@/tauri/localWorkspaceOpen'
 import { createLocalCodexPluginApi } from '@/api/local/codexPlugins'
+import { listWegentInstalledConnectorApps } from '@/api/cloud/connectorApps'
+import { requestLocalExecutor } from '@/tauri/localExecutor'
 import type {
   LocalDeviceApp,
   LocalDeviceSkill,
@@ -204,16 +206,7 @@ export function WorkbenchProvider({
     () => getRuntimePaneTaskExecution(state.runtimeWork, state.currentRuntimeTask).running,
     [state.currentRuntimeTask, state.runtimeWork]
   )
-  const currentRuntimeTaskRunning = useMemo(
-    () =>
-      authoritativeRuntimeTaskRunning ||
-      (state.currentRuntimeTask !== null &&
-        state.activeRuntimeTasks.some(
-          address =>
-            getRuntimeTaskRouteKey(address) === getRuntimeTaskRouteKey(state.currentRuntimeTask!)
-        )),
-    [authoritativeRuntimeTaskRunning, state.activeRuntimeTasks, state.currentRuntimeTask]
-  )
+  const currentRuntimeTaskRunning = authoritativeRuntimeTaskRunning
   const runtimeTaskReminders = useRuntimeTaskReminders({
     userId: user.id,
     runtimeWork: state.runtimeWork,
@@ -458,14 +451,19 @@ export function WorkbenchProvider({
     deleteAttachment: resolvedServices.attachmentApi?.deleteAttachment,
     scopeKey: projectChatScopeKey,
   })
-  const { cloudWorkStatus, refreshWorkLists, refreshDevices, getRemoteDeviceStartupCommand } =
-    useWorkbenchDataRefresh({
-      user,
-      state,
-      dispatch,
-      executorClient,
-      services: resolvedServices,
-    })
+  const {
+    cloudWorkStatus,
+    markRuntimeTasksArchived,
+    refreshWorkLists,
+    refreshDevices,
+    getRemoteDeviceStartupCommand,
+  } = useWorkbenchDataRefresh({
+    user,
+    state,
+    dispatch,
+    executorClient,
+    services: resolvedServices,
+  })
 
   const localRuntimeStateDeviceId = useMemo(
     () => getLocalRuntimeStateDeviceId(state.devices),
@@ -721,12 +719,6 @@ export function WorkbenchProvider({
       writeLastProjectId(user.id, null)
       rememberExecutionDevice(openedDeviceId)
       dispatch({
-        type: 'project_cleared',
-        standaloneDeviceId: openedDeviceId,
-        standaloneWorkspacePath: openedWorkspacePath,
-        startFreshChat: true,
-      })
-      dispatch({
         type: 'runtime_workspace_opened',
         deviceId: openedDeviceId,
         workspacePath: openedWorkspacePath,
@@ -918,10 +910,19 @@ export function WorkbenchProvider({
   const startNewProjectChat = useCallback(
     (projectId: number) => {
       const deviceWorkspaceId = getSingleProjectDeviceWorkspaceId(state.runtimeWork, projectId)
-      selectProjectWorkspace(projectId, deviceWorkspaceId)
+      const project = findSelectableProject(state.projects, state.runtimeWork, projectId)
+      if (!project) return
+      projectSelectionStartedRef.current = true
+      writeLastProjectId(user.id, project.id)
+      dispatch({
+        type: 'project_workspace_selected',
+        project,
+        deviceWorkspaceId,
+      })
+      navigateTo('/')
       requestNewChatComposerFocus()
     },
-    [selectProjectWorkspace, state.runtimeWork]
+    [state.projects, state.runtimeWork, user.id]
   )
 
   const runtimeTasks = useWorkbenchRuntimeTasks({
@@ -930,6 +931,7 @@ export function WorkbenchProvider({
     dispatch,
     executorClient,
     services: resolvedServices,
+    markRuntimeTasksArchived,
     refreshWorkLists,
   })
 
@@ -1197,23 +1199,64 @@ export function WorkbenchProvider({
     } catch (error) {
       console.warn('[Wework] Failed to load local Codex apps; continuing with skills only.', error)
     }
+    if (cloudConnection.isConnected && cloudConnection.apiBaseUrl && cloudConnection.token) {
+      try {
+        const installedConnectors = await listWegentInstalledConnectorApps(
+          cloudConnection.apiBaseUrl,
+          cloudConnection.token
+        )
+        const connectedApps = installedConnectors.apps.filter(app => app.enabled && app.callable)
+        const synced = await requestLocalExecutor<{
+          apps: Array<{ slug: string; skillPath: string }>
+        }>('runtime.connectors.apps.sync', {
+          apps: connectedApps.map(app => ({
+            slug: app.slug,
+            name: app.runtime_name ?? app.slug,
+            description: app.description ?? '',
+            tools: app.tool_summaries ?? [],
+          })),
+        })
+        const skillPathBySlug = new Map(synced.apps.map(app => [app.slug, app.skillPath]))
+        apps.push(
+          ...connectedApps.map(app => ({
+            id: `wegent:${app.slug}`,
+            name: app.runtime_name ?? app.slug,
+            description: app.description ?? '',
+            logoUrl: app.icon_url ?? null,
+            isAccessible: true,
+            isEnabled: true,
+            pluginDisplayNames: ['Wegent Cloud'],
+            source: 'wegent-connector',
+            skillPath: skillPathBySlug.get(app.slug) ?? null,
+          }))
+        )
+      } catch (error) {
+        console.warn('[Wework] Failed to load Wegent connector apps.', error)
+      }
+    }
     localAppsCacheRef.current = {
       expiresAt: Date.now() + LOCAL_SKILLS_CACHE_TTL_MS,
       apps,
     }
     return apps
-  }, [localPluginApi])
+  }, [
+    cloudConnection.apiBaseUrl,
+    cloudConnection.isConnected,
+    cloudConnection.token,
+    localPluginApi,
+  ])
 
   useEffect(() => {
     const clearLocalSkillCache = () => {
       localSkillsCacheRef.current.clear()
       localAppsCacheRef.current = null
     }
+    clearLocalSkillCache()
     window.addEventListener(LOCAL_PLUGIN_SKILLS_CHANGED_EVENT, clearLocalSkillCache)
     return () => {
       window.removeEventListener(LOCAL_PLUGIN_SKILLS_CHANGED_EVENT, clearLocalSkillCache)
     }
-  }, [])
+  }, [cloudConnection.apiBaseUrl, cloudConnection.isConnected, cloudConnection.token])
 
   const workspaceFileApi = useMemo(
     () => ({
@@ -1253,6 +1296,7 @@ export function WorkbenchProvider({
   )
   const projectChatValue = useMemo(
     () => ({
+      scopeKey: projectChatScopeKey,
       models: modelSelection.models,
       skills: skillSelection.skills,
       selectedModel: modelSelection.selectedModel,
@@ -1292,6 +1336,7 @@ export function WorkbenchProvider({
       attachmentSelection.removeAttachment,
       attachmentSelection.resetAttachments,
       attachmentSelection.uploadingFiles,
+      projectChatScopeKey,
       draftInput,
       trialTemplates,
       handleBlockedModelSelect,
@@ -1317,6 +1362,7 @@ export function WorkbenchProvider({
   )
   const paneProjectChatValue = useMemo(
     () => ({
+      scopeKey: projectChatScopeKey,
       models: modelSelection.models,
       skills: skillSelection.skills,
       selectedModel: modelSelection.selectedModel,
@@ -1356,6 +1402,7 @@ export function WorkbenchProvider({
       attachmentSelection.removeAttachment,
       attachmentSelection.resetAttachments,
       attachmentSelection.uploadingFiles,
+      projectChatScopeKey,
       draftInput,
       trialTemplates,
       handleBlockedModelSelect,
@@ -1647,6 +1694,7 @@ export function WorkbenchProvider({
       <WorkbenchPaneContext.Provider value={paneValue}>
         <RuntimeTaskCloseGuard runtimeWork={state.runtimeWork} />
         <LocalExecutorCloudBridge
+          apiBaseUrl={cloudConnection.apiBaseUrl}
           backendUrl={cloudConnection.backendUrl}
           isConnected={cloudConnection.isConnected}
           token={cloudConnection.token}

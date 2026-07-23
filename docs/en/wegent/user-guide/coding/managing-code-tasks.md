@@ -16,6 +16,7 @@ This guide explains how to create, execute, and manage code-type tasks in Wegent
 - [Task Status Management](#task-status-management)
 - [Sending Follow-ups While Running](#sending-follow-ups-while-running)
 - [Advanced Features](#advanced-features)
+- [Viewing Codex-generated Visualizations](#viewing-codex-generated-visualizations)
 - [Cleaning Stale Runtimes](#cleaning-stale-runtimes)
 - [Common Issues](#common-issues)
 
@@ -93,8 +94,9 @@ If the agent supports skills:
 ### Step 5: Enter Task Description and Send
 
 1. **Type your task description in the input box** - Clearly describe your requirements
-2. **Press Enter to send** - Or click the send button
-3. **Wait for response** - Agent starts processing and streams results
+2. **Add attachments (optional)** - Use the attachment button, or drag files from Finder directly into the Wework input box
+3. **Press Enter to send** - Or click the send button
+4. **Wait for response** - Agent starts processing and streams results
 
 ---
 
@@ -220,6 +222,14 @@ Export task conversation history and code changes:
 3. **Download file** - Save to local
 
 ---
+
+## Viewing Codex-generated Visualizations
+
+When Codex creates an HTML visualization in the task workspace and references it in its response, Wework displays the chart or interactive page directly in that response. You do not need to copy a file path or open a separate browser.
+
+- Wework loads only HTML files created or modified in the current response's file changes. Deleted, reverted, or unlisted files are never loaded inline.
+- The visualization runs in a script-isolated iframe and cannot access the Wework page.
+- Only relative workspace paths ending in `.html`, `.htm`, or `.xhtml` are accepted. Parent traversal, absolute paths, and directives inside code fences remain normal text.
 
 ## Cleaning Stale Runtimes
 

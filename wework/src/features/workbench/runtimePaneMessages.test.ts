@@ -6,6 +6,22 @@ import {
 import type { RuntimePaneMessageAction } from './runtimePaneMessages'
 import type { RuntimeTaskAddress } from '@/types/api'
 
+describe('runtime transcript status', () => {
+  test('does not infer streaming from an active conversation status', () => {
+    const [message] = runtimeMessagesToWorkbenchMessages([
+      {
+        id: 'assistant-history',
+        role: 'assistant',
+        content: 'Finished answer',
+        status: 'active',
+        subtaskId: 'turn-1',
+      },
+    ])
+
+    expect(message.status).toBe('done')
+  })
+})
+
 describe('createRuntimeTaskStreamHandlers', () => {
   afterEach(() => {
     vi.restoreAllMocks()
@@ -835,6 +851,24 @@ describe('runtimeMessagesToWorkbenchMessages', () => {
 
     expect(messages[0]).toMatchObject({
       content: '这是一段完整的短回复。',
+      contentTruncated: undefined,
+      contentOriginalChars: undefined,
+    })
+  })
+
+  test('ignores a short streamed suffix mislabeled as truncated content', () => {
+    const messages = runtimeMessagesToWorkbenchMessages([
+      {
+        id: 'assistant-k3',
+        role: 'assistant',
+        content: '保持两边同步。',
+        content_truncated: true,
+        content_original_chars: 26,
+      },
+    ])
+
+    expect(messages[0]).toMatchObject({
+      content: '保持两边同步。',
       contentTruncated: undefined,
       contentOriginalChars: undefined,
     })

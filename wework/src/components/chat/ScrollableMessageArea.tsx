@@ -26,6 +26,7 @@ const SCROLL_ANCHOR_SELECTOR = '[data-scroll-anchor]'
 
 interface ConversationScrollSnapshot {
   scrollTop: number
+  pinnedToBottom: boolean
   anchorMessageId?: string
   anchorOffsetTop?: number
   anchorDocumentTop?: number
@@ -231,7 +232,6 @@ function ScrollableMessagePaneContent({
   const scrollTimersRef = useRef<Array<ReturnType<typeof setTimeout>>>([])
   const scrollFrameRef = useRef<number | null>(null)
   const restoringScrollKeyRef = useRef<string | null>(null)
-  const applyingSavedScrollRef = useRef(false)
   const userScrollPausedAutoFollowRef = useRef(false)
   const scheduledScrollStateSignatureRef = useRef<string | null>(null)
   const completedScrollStateSignatureRef = useRef<string | null>(null)
@@ -278,12 +278,20 @@ function ScrollableMessagePaneContent({
   const clearScheduledScrolls = useCallback(() => {
     scrollTimersRef.current.forEach(timer => clearTimeout(timer))
     scrollTimersRef.current = []
-    applyingSavedScrollRef.current = false
+    restoringScrollKeyRef.current = null
 
     if (scrollFrameRef.current !== null) {
       cancelAnimationFrame(scrollFrameRef.current)
       scrollFrameRef.current = null
     }
+  }, [])
+
+  const scheduleScrollTimer = useCallback((callback: () => void, delay: number) => {
+    const timer = setTimeout(() => {
+      scrollTimersRef.current = scrollTimersRef.current.filter(current => current !== timer)
+      callback()
+    }, delay)
+    scrollTimersRef.current.push(timer)
   }, [])
 
   const isTurnNavigationAutoScrollSuspended = useCallback(
@@ -418,47 +426,35 @@ function ScrollableMessagePaneContent({
     [saveCurrentScrollPosition]
   )
 
-  const restoreSavedScrollPosition = useCallback(
-    (key: string, options: { clearScheduled?: boolean } = {}) => {
-      const element = activeScrollRefRef.current.current
-      const content = contentRef.current
-      const savedSnapshot = conversationScrollSnapshots.get(key)
-      if (!element || !savedSnapshot) return
+  const restoreSavedScrollPosition = useCallback((key: string) => {
+    const element = activeScrollRefRef.current.current
+    const content = contentRef.current
+    const savedSnapshot = conversationScrollSnapshots.get(key)
+    if (!element || !savedSnapshot) return
 
-      if (options.clearScheduled) {
-        clearScheduledScrolls()
-      }
-      const maxScrollTop = Math.max(0, element.scrollHeight - element.clientHeight)
-      const nextScrollTop = Math.min(
-        getRestoredScrollTop(element, content, savedSnapshot),
-        maxScrollTop
-      )
-      applyingSavedScrollRef.current = true
-      if (typeof element.scrollTo === 'function') {
-        element.scrollTo({
-          top: nextScrollTop,
-          behavior: 'auto',
-        })
-      } else {
-        element.scrollTop = nextScrollTop
-      }
+    const maxScrollTop = Math.max(0, element.scrollHeight - element.clientHeight)
+    const nextScrollTop = Math.min(
+      getRestoredScrollTop(element, content, savedSnapshot),
+      maxScrollTop
+    )
+    if (typeof element.scrollTo === 'function') {
+      element.scrollTo({
+        top: nextScrollTop,
+        behavior: 'auto',
+      })
+    } else {
+      element.scrollTop = nextScrollTop
+    }
 
-      const overflow = element.scrollHeight > element.clientHeight + 8
-      const distanceToBottom = element.scrollHeight - element.clientHeight - nextScrollTop
-      const isAtBottom = distanceToBottom <= BOTTOM_THRESHOLD
-      const isScrolledToBottom = distanceToBottom <= SCROLLED_TO_BOTTOM_THRESHOLD
-      isAtBottomRef.current = isAtBottom
-      userScrollPausedAutoFollowRef.current = !isScrolledToBottom
-      setShowScrollButton(overflow && !isAtBottom)
-      setConversationScrollSnapshot(key, savedSnapshot)
-
-      const applyingTimer = setTimeout(() => {
-        applyingSavedScrollRef.current = false
-      }, 0)
-      scrollTimersRef.current.push(applyingTimer)
-    },
-    [clearScheduledScrolls]
-  )
+    const overflow = element.scrollHeight > element.clientHeight + 8
+    const distanceToBottom = element.scrollHeight - element.clientHeight - nextScrollTop
+    const isAtBottom = distanceToBottom <= BOTTOM_THRESHOLD
+    const isScrolledToBottom = distanceToBottom <= SCROLLED_TO_BOTTOM_THRESHOLD
+    isAtBottomRef.current = isAtBottom
+    userScrollPausedAutoFollowRef.current = !isScrolledToBottom
+    setShowScrollButton(overflow && !isAtBottom)
+    setConversationScrollSnapshot(key, savedSnapshot)
+  }, [])
 
   const scheduleStableRestoreSavedScrollPosition = useCallback(
     (key: string) => {
@@ -466,13 +462,12 @@ function ScrollableMessagePaneContent({
       restoringScrollKeyRef.current = key
 
       STABLE_SCROLL_DELAYS.forEach(delay => {
-        const timer = setTimeout(() => {
-          restoreSavedScrollPosition(key, { clearScheduled: false })
+        scheduleScrollTimer(() => {
+          restoreSavedScrollPosition(key)
         }, delay)
-        scrollTimersRef.current.push(timer)
       })
 
-      const clearRestoreTimer = setTimeout(
+      scheduleScrollTimer(
         () => {
           if (restoringScrollKeyRef.current === key) {
             restoringScrollKeyRef.current = null
@@ -480,9 +475,8 @@ function ScrollableMessagePaneContent({
         },
         Math.max(...STABLE_SCROLL_DELAYS) + 50
       )
-      scrollTimersRef.current.push(clearRestoreTimer)
     },
-    [clearScheduledScrolls, restoreSavedScrollPosition]
+    [clearScheduledScrolls, restoreSavedScrollPosition, scheduleScrollTimer]
   )
 
   const scrollToBottom = useCallback(
@@ -507,13 +501,12 @@ function ScrollableMessagePaneContent({
       clearScheduledScrolls()
 
       STABLE_SCROLL_DELAYS.forEach(delay => {
-        const timer = setTimeout(() => {
+        scheduleScrollTimer(() => {
           scrollToBottom(behavior, options)
         }, delay)
-        scrollTimersRef.current.push(timer)
       })
     },
-    [clearScheduledScrolls, scrollToBottom]
+    [clearScheduledScrolls, scheduleScrollTimer, scrollToBottom]
   )
 
   useLayoutEffect(() => {
@@ -605,7 +598,7 @@ function ScrollableMessagePaneContent({
     const resizeObserver = new ResizeObserver(() => {
       const restoringKey = restoringScrollKeyRef.current
       if (restoringKey && restoringKey === currentScrollKey) {
-        restoreSavedScrollPosition(restoringKey, { clearScheduled: false })
+        restoreSavedScrollPosition(restoringKey)
         return
       }
 
@@ -614,7 +607,7 @@ function ScrollableMessagePaneContent({
       }
 
       if (userScrollPausedAutoFollowRef.current && currentScrollKey) {
-        restoreSavedScrollPosition(currentScrollKey, { clearScheduled: false })
+        restoreSavedScrollPosition(currentScrollKey)
         return
       }
 
@@ -650,11 +643,10 @@ function ScrollableMessagePaneContent({
   }, [clearScheduledScrolls])
 
   const handleScroll = useCallback(() => {
-    if (applyingSavedScrollRef.current && restoringScrollKeyRef.current === currentScrollKey) {
+    if (restoringScrollKeyRef.current === currentScrollKey) {
       updateScrollState({ skipSave: true })
       return
     }
-    applyingSavedScrollRef.current = false
     restoringScrollKeyRef.current = null
     updateScrollState({ forceSave: true })
   }, [currentScrollKey, updateScrollState])
@@ -835,8 +827,12 @@ function createScrollSnapshot(
   content: HTMLElement | null,
   scrollTop?: number
 ): ConversationScrollSnapshot {
+  const resolvedScrollTop = scrollTop ?? scroller.scrollTop
   const snapshot: ConversationScrollSnapshot = {
-    scrollTop: scrollTop ?? scroller.scrollTop,
+    scrollTop: resolvedScrollTop,
+    pinnedToBottom:
+      scroller.scrollHeight - scroller.clientHeight - resolvedScrollTop <=
+      SCROLLED_TO_BOTTOM_THRESHOLD,
   }
   if (scrollTop !== undefined || !content) return snapshot
 
@@ -872,6 +868,10 @@ function getRestoredScrollTop(
   content: HTMLElement | null,
   snapshot: ConversationScrollSnapshot
 ): number {
+  if (snapshot.pinnedToBottom) {
+    return Math.max(0, scroller.scrollHeight - scroller.clientHeight)
+  }
+
   if (!content || !snapshot.anchorMessageId || snapshot.anchorOffsetTop === undefined) {
     return Math.max(0, snapshot.scrollTop)
   }

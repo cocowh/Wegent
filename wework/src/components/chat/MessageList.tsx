@@ -113,6 +113,8 @@ const USER_MESSAGE_COLLAPSE_LINES = 10
 const USER_MESSAGE_COLLAPSE_CHARACTERS = 600
 const MESSAGE_LAYOUT_RESIZE_SETTLE_MS = 120
 const SELECTION_ACTION_GAP = 8
+const MESSAGE_WINDOW_ROOT_MARGIN = '1200px 0px'
+const ALWAYS_MOUNT_RECENT_MESSAGE_COUNT = 4
 
 interface MessageTextSelection {
   text: string
@@ -198,8 +200,7 @@ export const MessageList = memo(function MessageList({
     isWaitingForAssistant &&
     waitingForAssistantTurn &&
     !messages.some(message => message.role === 'assistant' && message.status === 'streaming')
-  const disableMessageContentVisibility =
-    disableContentVisibility || isTextSelectionActive || isTauri
+  const windowMessages = isTauri && !disableContentVisibility && !isTextSelectionActive
   const messageIntrinsicHeights = useMemo(() => {
     return new Map(
       visibleMessages.map(message => [
@@ -251,12 +252,14 @@ export const MessageList = memo(function MessageList({
   useEffect(() => {
     if (isTauri && (!onAddSelectionToConversation || !onAskSelectionInSidebar)) return
 
-    const updateSelectionState = () => {
+    const updateSelectionState = (preserveCapturedSelection = false) => {
       const selection = document.getSelection?.()
       const root = listRef.current
       if (!selection || !root || selection.isCollapsed || selection.rangeCount === 0) {
         setIsTextSelectionActive(false)
-        setTextSelection(null)
+        if (!preserveCapturedSelection) {
+          setTextSelection(null)
+        }
         return
       }
 
@@ -288,28 +291,42 @@ export const MessageList = memo(function MessageList({
     }
 
     const scheduleSelectionUpdate = () => {
-      window.requestAnimationFrame(updateSelectionState)
+      window.requestAnimationFrame(() => updateSelectionState(true))
+    }
+
+    const finalizeSelectionUpdate = (event: Event) => {
+      if (
+        event.target instanceof Element &&
+        event.target.closest('[data-testid="message-selection-actions"]')
+      ) {
+        return
+      }
+      updateSelectionState()
     }
 
     const handleBlur = () => {
       updateSelectionState()
     }
 
-    document.addEventListener('pointerup', scheduleSelectionUpdate)
-    document.addEventListener('pointercancel', scheduleSelectionUpdate)
-    document.addEventListener('mouseup', scheduleSelectionUpdate)
-    document.addEventListener('keyup', scheduleSelectionUpdate)
+    const handleScroll = () => {
+      updateSelectionState(true)
+    }
+
+    document.addEventListener('pointerup', finalizeSelectionUpdate)
+    document.addEventListener('pointercancel', finalizeSelectionUpdate)
+    document.addEventListener('mouseup', finalizeSelectionUpdate)
+    document.addEventListener('keyup', finalizeSelectionUpdate)
     document.addEventListener('selectionchange', scheduleSelectionUpdate)
-    window.addEventListener('scroll', updateSelectionState, true)
+    window.addEventListener('scroll', handleScroll, true)
     window.addEventListener('blur', handleBlur)
 
     return () => {
-      document.removeEventListener('pointerup', scheduleSelectionUpdate)
-      document.removeEventListener('pointercancel', scheduleSelectionUpdate)
-      document.removeEventListener('mouseup', scheduleSelectionUpdate)
-      document.removeEventListener('keyup', scheduleSelectionUpdate)
+      document.removeEventListener('pointerup', finalizeSelectionUpdate)
+      document.removeEventListener('pointercancel', finalizeSelectionUpdate)
+      document.removeEventListener('mouseup', finalizeSelectionUpdate)
+      document.removeEventListener('keyup', finalizeSelectionUpdate)
       document.removeEventListener('selectionchange', scheduleSelectionUpdate)
-      window.removeEventListener('scroll', updateSelectionState, true)
+      window.removeEventListener('scroll', handleScroll, true)
       window.removeEventListener('blur', handleBlur)
     }
   }, [conversationKey, isTauri, onAddSelectionToConversation, onAskSelectionInSidebar])
@@ -357,19 +374,19 @@ export const MessageList = memo(function MessageList({
         )}
       {visibleMessages.map((message, index) => {
         const nextMessage = visibleMessages[index + 1]
+        const forceMounted =
+          index >= visibleMessages.length - ALWAYS_MOUNT_RECENT_MESSAGE_COUNT ||
+          message.status === 'streaming' ||
+          message.id === activeEditingMessageId ||
+          message.id === activeSubmittingEditMessageId
         return (
           <Fragment key={message.id}>
-            <article
-              className={[
-                'min-w-0',
-                disableMessageContentVisibility ? '' : '[content-visibility:auto]',
-                message.role === 'user' ? 'flex justify-end' : '',
-              ].join(' ')}
-              style={
-                disableMessageContentVisibility
-                  ? undefined
-                  : getMessageContainmentStyle(messageIntrinsicHeights.get(message.id))
-              }
+            <WindowedMessageArticle
+              enabled={windowMessages}
+              estimatedHeight={messageIntrinsicHeights.get(message.id)}
+              forceMounted={forceMounted}
+              messageRole={message.role}
+              useContentVisibility={!isTauri && !disableContentVisibility && !isTextSelectionActive}
               data-message-id={message.id}
               data-testid={`message-${message.role}`}
             >
@@ -420,7 +437,7 @@ export const MessageList = memo(function MessageList({
                   hiddenRequestUserInputIds={hiddenRequestUserInputIds}
                 />
               )}
-            </article>
+            </WindowedMessageArticle>
             {renderGapAfterMessage?.(message, nextMessage)}
           </Fragment>
         )
@@ -433,6 +450,74 @@ export const MessageList = memo(function MessageList({
     </div>
   )
 }, areMessageListPropsEqual)
+
+function WindowedMessageArticle({
+  enabled,
+  estimatedHeight,
+  forceMounted,
+  messageRole,
+  useContentVisibility,
+  children,
+  ...attributes
+}: {
+  enabled: boolean
+  estimatedHeight: number | undefined
+  forceMounted: boolean
+  messageRole: WorkbenchMessage['role']
+  useContentVisibility: boolean
+  children: ReactNode
+  'data-message-id': string
+  'data-testid': string
+}) {
+  const articleRef = useRef<HTMLElement>(null)
+  const canObserve = enabled && typeof IntersectionObserver !== 'undefined'
+  const [nearViewport, setNearViewport] = useState(!canObserve || forceMounted)
+  const [retainedHeight, setRetainedHeight] = useState<number | null>(null)
+  const mounted = forceMounted || !canObserve || nearViewport
+
+  useEffect(() => {
+    if (!canObserve || forceMounted) return
+
+    const article = articleRef.current
+    if (!article) return
+    const observer = new IntersectionObserver(
+      entries => {
+        const entry = entries[0]
+        if (!entry) return
+        if (!entry.isIntersecting) {
+          const height = article.getBoundingClientRect().height
+          if (height > 0) setRetainedHeight(height)
+        }
+        setNearViewport(entry.isIntersecting)
+      },
+      { rootMargin: MESSAGE_WINDOW_ROOT_MARGIN }
+    )
+    observer.observe(article)
+    return () => observer.disconnect()
+  }, [canObserve, forceMounted])
+
+  const placeholderHeight = Math.ceil(retainedHeight ?? estimatedHeight ?? 220)
+  return (
+    <article
+      ref={articleRef}
+      className={cn(
+        'min-w-0',
+        useContentVisibility && '[content-visibility:auto]',
+        messageRole === 'user' && 'flex justify-end'
+      )}
+      style={
+        mounted
+          ? useContentVisibility
+            ? getMessageContainmentStyle(estimatedHeight)
+            : undefined
+          : { minHeight: placeholderHeight }
+      }
+      {...attributes}
+    >
+      {mounted ? children : null}
+    </article>
+  )
+}
 
 function getMessageContainmentStyle(estimatedHeight: number | undefined): CSSProperties {
   return {
@@ -1623,7 +1708,10 @@ function AssistantMessage({
   const visibleContent = shouldHideContent ? '' : message.content
   const hiddenErrorContent =
     message.status === 'failed' && shouldHideContent ? message.content.trim() : undefined
-  const displayBlocks = getDisplayProcessingBlocks(message.blocks, isCancelled)
+  const displayBlocks = useMemo(
+    () => getDisplayProcessingBlocks(message.blocks, isCancelled),
+    [isCancelled, message.blocks]
+  )
   const processingSegments = splitProcessingBlocks(displayBlocks)
   const hasBlocks = displayBlocks.length > 0
   const hasVisibleContent = Boolean(visibleContent.trim())
@@ -1646,7 +1734,7 @@ function AssistantMessage({
     !message.runtimeGuidanceSplitBefore &&
     !message.runtimeGuidanceContinuation
   const shouldShowThinking = shouldShowAssistantThinkingIndicator({
-    isAssistantRunning,
+    isStreaming,
     hasProcessingDisplayBlock: hasProcessingDisplayBlock(displayBlocks),
     hasVisibleContent,
   })
@@ -1654,7 +1742,7 @@ function AssistantMessage({
     ? []
     : getWebSearchSourceItems(getWebSearchToolBlocks(displayBlocks))
   const memoryCitations = message.memoryCitations ?? []
-  const generatedImages = getGeneratedImages(displayBlocks)
+  const generatedImages = useMemo(() => getGeneratedImages(displayBlocks), [displayBlocks])
   const [areHoverActionsVisible, setAreHoverActionsVisible] = useState(false)
 
   const openFileFromLink = (path: string, options?: WorkspaceFileOpenOptions) => {
@@ -1764,9 +1852,11 @@ function AssistantMessage({
                 content={visibleContent}
                 isStreaming={isStreaming}
                 onOpenFile={openFileFromLink}
+                fileChanges={message.fileChanges}
               />
             </div>
           ) : null}
+          {shouldShowThinking && hasVisibleContent && <AssistantThinkingIndicator />}
           {canShowFinalArtifacts && hasVisibleContent && webSearchSources.length > 0 && (
             <WebSearchSourcesChip sources={webSearchSources} />
           )}
@@ -1823,6 +1913,19 @@ interface GeneratedImageArtifact {
   alt: string
 }
 
+function generatedImageAttachment(image: GeneratedImageArtifact, index: number): Attachment {
+  return {
+    id: index + 1,
+    filename: image.alt,
+    file_size: 0,
+    mime_type: 'image/png',
+    status: 'ready',
+    file_extension: '.png',
+    created_at: '',
+    local_preview_url: image.src,
+  }
+}
+
 function getGeneratedImages(blocks: ProcessingBlock[]): GeneratedImageArtifact[] {
   return blocks.flatMap(block => {
     if (block.type !== 'tool' || block.toolName !== 'image_generation') return []
@@ -1845,21 +1948,42 @@ function getGeneratedImages(blocks: ProcessingBlock[]): GeneratedImageArtifact[]
 }
 
 function GeneratedImageGallery({ images }: { images: GeneratedImageArtifact[] }) {
+  const attachments = useMemo(() => images.map(generatedImageAttachment), [images])
+
   return (
     <div
       className="mb-3 grid max-w-3xl grid-cols-1 gap-3 sm:grid-cols-2"
       data-testid="generated-image-gallery"
     >
-      {images.map(image => (
-        <img
-          key={image.id}
-          src={image.src}
-          alt={image.alt}
-          className="h-auto w-full rounded-lg border border-border bg-surface object-contain"
-          data-testid="generated-image"
-        />
+      {images.map((image, index) => (
+        <GeneratedImagePreview key={image.id} index={index} galleryAttachments={attachments} />
       ))}
     </div>
+  )
+}
+
+function GeneratedImagePreview({
+  index,
+  galleryAttachments,
+}: {
+  index: number
+  galleryAttachments: Attachment[]
+}) {
+  const attachment = galleryAttachments[index]
+
+  return (
+    <AttachmentImagePreview
+      attachment={attachment}
+      galleryAttachments={galleryAttachments}
+      galleryIndex={index}
+      buttonTestId="generated-image-preview-button"
+      imageTestId="generated-image"
+      loadingTestId="generated-image-loading"
+      errorTestId="generated-image-error"
+      imageClassName="h-auto w-full rounded-lg border border-border bg-surface object-contain"
+      placeholderClassName="flex min-h-40 w-full items-center justify-center rounded-lg border border-border bg-surface text-text-muted"
+      buttonClassName="block w-full cursor-zoom-in p-0 text-left"
+    />
   )
 }
 
@@ -1950,15 +2074,15 @@ function hasProcessingDisplayBlock(blocks: ProcessingBlock[]): boolean {
 }
 
 function shouldShowAssistantThinkingIndicator({
-  isAssistantRunning,
+  isStreaming,
   hasProcessingDisplayBlock,
   hasVisibleContent,
 }: {
-  isAssistantRunning: boolean
+  isStreaming: boolean
   hasProcessingDisplayBlock: boolean
   hasVisibleContent: boolean
 }): boolean {
-  return isAssistantRunning && !hasProcessingDisplayBlock && !hasVisibleContent
+  return isStreaming && (!hasProcessingDisplayBlock || hasVisibleContent)
 }
 
 function AssistantErrorCard({
