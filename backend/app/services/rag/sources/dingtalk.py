@@ -60,6 +60,7 @@ class _PreparedRef:
     canonical_ref_key: str
     allowed_node_ids: set[str]
     readable_node_ids: set[str]
+    workspace_ids: list[str]
 
 
 class DingTalkRetrievalSourceProvider:
@@ -108,6 +109,24 @@ class DingTalkRetrievalSourceProvider:
                         warnings.append(_missing_catalog_warning(ref))
                         continue
                     allowed_node_ids = _allowed_node_ids(db, ctx.user_id, ref, nodes)
+                    workspace_ids = _workspace_ids(nodes)
+                    if (
+                        _source_for_ref(ref) == DingTalkNodeSource.DOCS
+                        and not _is_document_ref(ref)
+                        and not workspace_ids
+                    ):
+                        statuses.append(
+                            _source_status(
+                                ref,
+                                source_id,
+                                source_name,
+                                "failed",
+                                0,
+                                reason="scope_sync_required",
+                            )
+                        )
+                        warnings.append(_missing_docs_workspace_warning())
+                        continue
                     prepared_refs.append(
                         _PreparedRef(
                             ref=ref,
@@ -118,6 +137,7 @@ class DingTalkRetrievalSourceProvider:
                             readable_node_ids=_readable_node_ids(
                                 db, ctx.user_id, ref, allowed_node_ids
                             ),
+                            workspace_ids=workspace_ids,
                         )
                     )
 
@@ -289,6 +309,7 @@ async def _retrieve_single_prepared_ref(
             source_name=prepared.source_name,
             allowed_node_ids=prepared.allowed_node_ids,
             readable_node_ids=prepared.readable_node_ids,
+            workspace_ids=prepared.workspace_ids,
         )
         return records, warnings, False
     except DingTalkMcpError as exc:
@@ -441,6 +462,7 @@ async def _retrieve_ref_content(
     source_name: str | None,
     allowed_node_ids: set[str],
     readable_node_ids: set[str],
+    workspace_ids: list[str],
 ) -> tuple[list[Any], list[str]]:
     """Resolve one ref using direct reads or bounded metadata search."""
     if _is_document_ref(ref):
@@ -461,15 +483,17 @@ async def _retrieve_ref_content(
             )
         ], []
 
-    workspace_ids = (
-        [source_id] if _source_for_ref(ref) == DingTalkNodeSource.WIKISPACE else None
+    search_workspace_ids = (
+        workspace_ids
+        if _source_for_ref(ref) == DingTalkNodeSource.DOCS
+        else [source_id]
     )
     candidates: list[dict[str, Any]] = []
     page_token: str | None = None
     for page_number in range(MAX_SEARCH_PAGES):
         search_page = await client.search_documents(
             keyword=query,
-            workspace_ids=workspace_ids,
+            workspace_ids=search_workspace_ids,
             extensions=sorted(READABLE_CONTENT_TYPES),
             page_token=page_token,
             page_size=MAX_SEARCH_CANDIDATES,
@@ -561,6 +585,11 @@ def _missing_catalog_warning(ref) -> str:
     return "DingTalk document directory is not synced for the selected ref"
 
 
+def _missing_docs_workspace_warning() -> str:
+    """Return an actionable message without exposing provider details."""
+    return "DingTalk personal document scope is missing; please resync DingTalk Docs"
+
+
 def _mcp_warning(error: DingTalkMcpError) -> str:
     messages = {
         "tool_unavailable": "DingTalk Docs MCP tool is unavailable",
@@ -579,6 +608,8 @@ def _source_status(
     source_name: str | None,
     status: str,
     record_count: int,
+    *,
+    reason: str | None = None,
 ) -> RetrievalSourceStatus:
     return RetrievalSourceStatus(
         provider="dingtalk",
@@ -588,6 +619,7 @@ def _source_status(
         record_count=record_count,
         citation_count=record_count,
         canonical_ref_key=external_ref_canonical_key(ref),
+        reason=reason,
     )
 
 
@@ -610,6 +642,17 @@ def _find_matching_nodes(
     if node_identifiers:
         query = query.filter(DingtalkSyncedNode.dingtalk_node_id.in_(node_identifiers))
     return query.all()
+
+
+def _workspace_ids(nodes: list[DingtalkSyncedNode]) -> list[str]:
+    """Return the non-empty provider workspace IDs recorded in the catalog."""
+    return sorted(
+        {
+            str(node.workspace_id).strip()
+            for node in nodes
+            if node.workspace_id and str(node.workspace_id).strip()
+        }
+    )
 
 
 def _allowed_node_ids(

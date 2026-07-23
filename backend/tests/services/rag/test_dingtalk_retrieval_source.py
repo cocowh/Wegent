@@ -79,7 +79,7 @@ def _create_synced_node(
     node_type: str = "doc",
     parent_node_id: str = "",
     source: str = "docs",
-    workspace_id: str = "",
+    workspace_id: str = "personal-ws",
     content_type: str = "ALIDOC",
 ) -> DingtalkSyncedNode:
     node = DingtalkSyncedNode(
@@ -405,8 +405,10 @@ async def test_docs_ref_searches_metadata_then_reads_document_content(
     assert session.calls[0][1] == {
         "keyword": "launch",
         "pageSize": 10,
+        "workspaceIds": ["personal-ws"],
         "extensions": ["adoc"],
     }
+    assert session.calls[0][1]["workspaceIds"] != ["docs"]
 
 
 @pytest.mark.asyncio
@@ -697,6 +699,18 @@ async def test_empty_successful_search_is_no_hit(
 
     assert result.records == []
     assert result.summary.source_statuses[0].status == "no_hit"
+    assert result.summary.searched_source_ids == ["docs"]
+    assert session.calls == [
+        (
+            "search_documents",
+            {
+                "keyword": "launch",
+                "pageSize": 10,
+                "workspaceIds": ["personal-ws"],
+                "extensions": ["adoc"],
+            },
+        )
+    ]
 
 
 @pytest.mark.asyncio
@@ -805,6 +819,44 @@ async def test_folder_scope_only_reads_descendants(
     )()
 
     assert [record.metadata["node_id"] for record in result.records] == ["doc-1"]
+    assert [
+        call[1]["workspaceIds"]
+        for call in session.calls
+        if call[0] == "search_documents"
+    ] == [["personal-ws"]]
+
+
+@pytest.mark.asyncio
+async def test_docs_scope_without_workspace_id_requires_resync(
+    test_db: Session, test_user: User
+) -> None:
+    _create_synced_node(
+        test_db,
+        test_user.id,
+        node_id="doc-1",
+        name="Legacy document",
+        workspace_id="",
+    )
+    session = _FakeMcpSession({})
+
+    result, requested_urls = await _run_with_fake_mcp(
+        test_db,
+        test_user,
+        _provider_ref(id="docs", target_type="knowledge_base"),
+        session,
+    )()
+
+    assert requested_urls == []
+    assert session.calls == []
+    assert result.records == []
+    assert result.summary.searched_source_ids == []
+    status = result.summary.source_statuses[0]
+    assert status.status == "failed"
+    assert status.reason == "scope_sync_required"
+    assert result.warnings == [
+        "DingTalk personal document scope is missing; please resync DingTalk Docs"
+    ]
+    assert "https://" not in " ".join(result.warnings)
 
 
 def test_validate_wikispace_requires_docs_mcp(
